@@ -8,9 +8,9 @@ class ListarUsuarios:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 
-    def executar(
+    async def executar(
         self, ator: Usuario, filtros: FiltrosUsuario, limit: int, offset: int
     ) -> tuple[list[Usuario], int]:
         if ator.papel not in (Papel.ADMIN, Papel.GERENTE):
             raise PermissaoNegada
-        return self._uow.usuarios.listar(filtros, limit, offset)
+        return await self._uow.usuarios.listar(filtros, limit, offset)

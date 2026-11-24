@@ -1,15 +1,15 @@
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence.auditoria.models import AuditLogModel
 
 
 class SqlAlchemyAuditoria:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    def registrar(
+    async def registrar(
         self,
         usuario_id: int | None,
         acao: str,

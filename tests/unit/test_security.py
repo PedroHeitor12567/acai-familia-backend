@@ -7,12 +7,12 @@ from app.infrastructure.security.hashing import Argon2Hasher
 from app.infrastructure.security.jwt_service import JwtService
 
 
-def test_hash_e_verificacao() -> None:
+async def test_hash_e_verificacao() -> None:
     h = Argon2Hasher()
-    hashed = h.hash("segredo-123")
+    hashed = await h.hash("segredo-123")
     assert hashed != "segredo-123"
-    assert h.verify(hashed, "segredo-123")
-    assert not h.verify(hashed, "outra")
+    assert await h.verify(hashed, "segredo-123")
+    assert not await h.verify(hashed, "outra")
 
 
 def test_jwt_tipo_incorreto_rejeitado() -> None:

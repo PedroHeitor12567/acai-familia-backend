@@ -53,12 +53,12 @@ rodam quando `TEST_DATABASE_URL` está definida; sem ela são *skipped*.
 
 ```bash
 uv run task db        # sobe o PostgreSQL (docker compose)
-DATABASE_URL=postgresql+psycopg://acai:acai@localhost:5432/acai uv run task migrate
-export TEST_DATABASE_URL=postgresql+psycopg://acai:acai@localhost:5432/acai
+DATABASE_URL=postgresql+asyncpg://acai:acai@localhost:5432/acai uv run task migrate
+export TEST_DATABASE_URL=postgresql+asyncpg://acai:acai@localhost:5432/acai
 uv run pytest -q -m postgres
 ```
 
-No PowerShell: `$env:TEST_DATABASE_URL = "postgresql+psycopg://acai:acai@localhost:5432/acai"`.
+No PowerShell: `$env:TEST_DATABASE_URL = "postgresql+asyncpg://acai:acai@localhost:5432/acai"`.
 Cada teste roda numa transação com rollback no final (fixture `pg_session`). O CI sobe o
 PostgreSQL 16, roda `alembic upgrade head`, `alembic check` (falha se um model divergir das
 migrations) e então os testes.
@@ -71,6 +71,8 @@ migrations) e então os testes.
 | API (rotas, permissões, validação) | `tests/integration` | SQLite em memória |
 | Fluxo ponta a ponta (`@pytest.mark.postgres`) | `tests/e2e` | PostgreSQL migrado pelo Alembic |
 
+Os testes são `async` (pytest-asyncio em modo `auto`, cliente `httpx.AsyncClient`; SQLite via `aiosqlite`).
+
 Helpers em `tests/conftest.py`: `auth_headers(email, papel)` cria o usuário, faz login e devolve o
 header `Authorization` (use em vez de repetir login nos testes de API); `pg_client` é a API
 completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no formato de
@@ -82,6 +84,10 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
 - Rate limit de login (em memória; usar Redis com várias réplicas)
 - Auditoria (`audit_log`), headers de segurança, CORS por lista, limite de body, docs off em produção
 - Unit of Work, Alembic, Docker não-root, CI
+- API assíncrona de ponta a ponta: FastAPI + SQLAlchemy `AsyncSession` + `asyncpg` (PostgreSQL). Portas, repositórios,
+  Unit of Work e casos de uso são `async`; o hash argon2 roda em thread para não travar o event loop.
+  A `DATABASE_URL` usa `postgresql+asyncpg://...` (URLs `postgresql://` ou `+psycopg` são convertidas automaticamente).
+  O Alembic também roda via engine assíncrona.
 - Gestão de usuários:
 
   | Rota | Quem | |

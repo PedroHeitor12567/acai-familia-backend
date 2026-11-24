@@ -4,7 +4,7 @@ from typing import Any, Protocol
 class Auditoria(Protocol):
     """Registro de ações sensíveis (quem fez o quê, quando)."""
 
-    def registrar(
+    async def registrar(
         self,
         usuario_id: int | None,
         acao: str,

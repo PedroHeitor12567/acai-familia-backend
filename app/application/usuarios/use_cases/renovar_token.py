@@ -14,9 +14,9 @@ class RenovarToken:
         self._uow = uow
         self._tokens = tokens
 
-    def executar(self, refresh_token: str) -> TokenPar:
+    async def executar(self, refresh_token: str) -> TokenPar:
         claims = self._tokens.decodificar(refresh_token, "refresh")
-        usuario = self._uow.usuarios.obter_por_id(claims.usuario_id)
+        usuario = await self._uow.usuarios.obter_por_id(claims.usuario_id)
         if usuario is None or not usuario.ativo:
             raise TokenInvalido
         return TokenPar(

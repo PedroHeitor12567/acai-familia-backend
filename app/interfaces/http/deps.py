@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends
@@ -42,7 +42,7 @@ AlterarPropriaSenhaDep = Annotated[AlterarPropriaSenha, Depends(get_alterar_prop
 RedefinirSenhaDep = Annotated[RedefinirSenha, Depends(get_redefinir_senha)]
 
 
-def get_current_user(
+async def get_current_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     tokens: TokensDep,
     uow: UowDep,
@@ -50,7 +50,7 @@ def get_current_user(
     if creds is None:
         raise TokenInvalido
     claims = tokens.decodificar(creds.credentials, "access")
-    usuario = uow.usuarios.obter_por_id(claims.usuario_id)
+    usuario = await uow.usuarios.obter_por_id(claims.usuario_id)
     if usuario is None or not usuario.ativo:
         raise TokenInvalido
     return usuario
@@ -59,10 +59,10 @@ def get_current_user(
 CurrentUser = Annotated[Usuario, Depends(get_current_user)]
 
 
-def require_roles(*papeis: Papel) -> Callable[[Usuario], Usuario]:
+def require_roles(*papeis: Papel) -> Callable[[Usuario], Awaitable[Usuario]]:
     """Barreira de borda (HTTP). A regra de quem pode o quê também é checada no caso de uso."""
 
-    def checker(usuario: CurrentUser) -> Usuario:
+    async def checker(usuario: CurrentUser) -> Usuario:
         if usuario.papel not in papeis:
             raise PermissaoNegada
         return usuario

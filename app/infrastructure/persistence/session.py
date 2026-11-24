@@ -1,25 +1,26 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.config import get_settings
 
 
-def make_engine(url: str) -> Engine:
-    return create_engine(url, pool_pre_ping=True)
+def make_engine(url: str) -> AsyncEngine:
+    return create_async_engine(url, pool_pre_ping=True)
 
 
 @lru_cache
-def get_session_factory() -> sessionmaker[Session]:
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
     engine = make_engine(get_settings().database_url)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return async_sessionmaker(bind=engine, expire_on_commit=False)
 
 
-def get_session() -> Iterator[Session]:
-    session = get_session_factory()()
-    try:
-        yield session
-    finally:
-        session.close()  # rollback implícito se não houve commit
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with get_session_factory()() as session:
+        yield session  # o `close()` ao sair faz rollback implícito se não houve commit

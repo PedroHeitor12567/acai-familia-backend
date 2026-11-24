@@ -9,24 +9,24 @@ class CriarUsuario:
         self._uow = uow
         self._hasher = hasher
 
-    def executar(
+    async def executar(
         self, ator: Usuario | None, nome: str, email: str, senha: str, papel: Papel
     ) -> Usuario:
         """`ator=None` representa o bootstrap do sistema (script do primeiro admin)."""
         if ator is not None and ator.papel is not Papel.ADMIN:
             raise PermissaoNegada
         email = email.lower()
-        if self._uow.usuarios.obter_por_email(email) is not None:
+        if await self._uow.usuarios.obter_por_email(email) is not None:
             raise EmailJaCadastrado
-        usuario = self._uow.usuarios.adicionar(
-            Usuario(nome=nome, email=email, senha_hash=self._hasher.hash(senha), papel=papel)
+        usuario = await self._uow.usuarios.adicionar(
+            Usuario(nome=nome, email=email, senha_hash=await self._hasher.hash(senha), papel=papel)
         )
-        self._uow.auditoria.registrar(
+        await self._uow.auditoria.registrar(
             ator.id_persistido if ator else None,
             "criar",
             "usuario",
             str(usuario.id),
             {"email": email, "papel": str(papel)},
         )
-        self._uow.commit()
+        await self._uow.commit()
         return usuario

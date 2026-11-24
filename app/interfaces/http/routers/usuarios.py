@@ -28,13 +28,15 @@ GestorDep = Annotated[Usuario, Depends(require_roles(Papel.ADMIN, Papel.GERENTE)
 
 
 @router.post("", response_model=UsuarioOut, status_code=status.HTTP_201_CREATED)
-def criar_usuario(body: UsuarioCreateIn, admin: AdminDep, caso: CriarUsuarioDep) -> UsuarioOut:
-    novo = caso.executar(admin, body.nome, body.email, body.senha, body.papel)
+async def criar_usuario(
+    body: UsuarioCreateIn, admin: AdminDep, caso: CriarUsuarioDep
+) -> UsuarioOut:
+    novo = await caso.executar(admin, body.nome, body.email, body.senha, body.papel)
     return UsuarioOut.de_entidade(novo)
 
 
 @router.get("", response_model=PaginaUsuariosOut)
-def listar_usuarios(
+async def listar_usuarios(
     ator: GestorDep,
     caso: ListarUsuariosDep,
     ativo: bool | None = None,
@@ -43,40 +45,44 @@ def listar_usuarios(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaginaUsuariosOut:
-    itens, total = caso.executar(ator, FiltrosUsuario(ativo=ativo, papel=papel, q=q), limit, offset)
+    itens, total = await caso.executar(
+        ator, FiltrosUsuario(ativo=ativo, papel=papel, q=q), limit, offset
+    )
     return PaginaUsuariosOut(
         itens=[UsuarioOut.de_entidade(u) for u in itens], total=total, limit=limit, offset=offset
     )
 
 
 @router.get("/{usuario_id}", response_model=UsuarioOut)
-def obter_usuario(usuario_id: int, ator: GestorDep, caso: ObterUsuarioDep) -> UsuarioOut:
-    return UsuarioOut.de_entidade(caso.executar(ator, usuario_id))
+async def obter_usuario(usuario_id: int, ator: GestorDep, caso: ObterUsuarioDep) -> UsuarioOut:
+    return UsuarioOut.de_entidade(await caso.executar(ator, usuario_id))
 
 
 @router.patch("/{usuario_id}", response_model=UsuarioOut)
-def atualizar_usuario(
+async def atualizar_usuario(
     usuario_id: int, body: UsuarioUpdateIn, admin: AdminDep, caso: AtualizarUsuarioDep
 ) -> UsuarioOut:
-    atualizado = caso.executar(admin, usuario_id, body.nome, body.email, body.papel)
+    atualizado = await caso.executar(admin, usuario_id, body.nome, body.email, body.papel)
     return UsuarioOut.de_entidade(atualizado)
 
 
 @router.post("/{usuario_id}/desativar", response_model=UsuarioOut)
-def desativar_usuario(
+async def desativar_usuario(
     usuario_id: int, admin: AdminDep, caso: AlterarStatusUsuarioDep
 ) -> UsuarioOut:
-    return UsuarioOut.de_entidade(caso.executar(admin, usuario_id, ativo=False))
+    return UsuarioOut.de_entidade(await caso.executar(admin, usuario_id, ativo=False))
 
 
 @router.post("/{usuario_id}/reativar", response_model=UsuarioOut)
-def reativar_usuario(usuario_id: int, admin: AdminDep, caso: AlterarStatusUsuarioDep) -> UsuarioOut:
-    return UsuarioOut.de_entidade(caso.executar(admin, usuario_id, ativo=True))
+async def reativar_usuario(
+    usuario_id: int, admin: AdminDep, caso: AlterarStatusUsuarioDep
+) -> UsuarioOut:
+    return UsuarioOut.de_entidade(await caso.executar(admin, usuario_id, ativo=True))
 
 
 @router.post("/{usuario_id}/redefinir-senha", status_code=status.HTTP_204_NO_CONTENT)
-def redefinir_senha(
+async def redefinir_senha(
     usuario_id: int, body: RedefinirSenhaIn, admin: AdminDep, caso: RedefinirSenhaDep
 ) -> Response:
-    caso.executar(admin, usuario_id, body.nova_senha)
+    await caso.executar(admin, usuario_id, body.nova_senha)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,12 +3,12 @@
 Routers e casos de uso nunca importam `infrastructure`; recebem o que este módulo monta.
 """
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.seguranca.ports import LoginThrottle, PasswordHasher, TokenService
 from app.application.unit_of_work import UnitOfWork
@@ -45,7 +45,7 @@ def get_login_throttle() -> InMemoryLoginThrottle:
 # --- construtores puros (usáveis fora do FastAPI: scripts, workers, testes) -----------------
 
 
-def build_uow(session: Session) -> UnitOfWork:
+def build_uow(session: AsyncSession) -> UnitOfWork:
     return SqlAlchemyUnitOfWork(session)
 
 
@@ -53,23 +53,24 @@ def build_token_service(settings: Settings) -> TokenService:
     return JwtService(settings)
 
 
-def build_criar_usuario(session: Session) -> CriarUsuario:
+def build_criar_usuario(session: AsyncSession) -> CriarUsuario:
     return CriarUsuario(build_uow(session), get_hasher())
 
 
-def abrir_sessao() -> Session:
+def abrir_sessao() -> AsyncSession:
     return get_session_factory()()
 
 
 # --- providers do FastAPI -------------------------------------------------------------------
 
 
-def get_db() -> Iterator[Session]:
-    yield from get_session()
+async def get_db() -> AsyncIterator[AsyncSession]:
+    async for session in get_session():
+        yield session
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
-SessionDep = Annotated[Session, Depends(get_db)]
+SessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def get_uow(session: SessionDep) -> UnitOfWork:

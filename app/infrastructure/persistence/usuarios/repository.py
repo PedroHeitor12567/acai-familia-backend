@@ -1,5 +1,5 @@
 from sqlalchemy import ColumnElement, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.usuarios.ports import FiltrosUsuario
 from app.domain.usuarios.entities import Papel, Usuario
@@ -23,18 +23,18 @@ def _to_entity(m: UsuarioModel) -> Usuario:
 
 
 class SqlAlchemyUsuarioRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    def obter_por_email(self, email: str) -> Usuario | None:
-        m = self._s.scalar(select(UsuarioModel).where(UsuarioModel.email == email))
+    async def obter_por_email(self, email: str) -> Usuario | None:
+        m = await self._s.scalar(select(UsuarioModel).where(UsuarioModel.email == email))
         return _to_entity(m) if m else None
 
-    def obter_por_id(self, usuario_id: int) -> Usuario | None:
-        m = self._s.get(UsuarioModel, usuario_id)
+    async def obter_por_id(self, usuario_id: int) -> Usuario | None:
+        m = await self._s.get(UsuarioModel, usuario_id)
         return _to_entity(m) if m else None
 
-    def adicionar(self, usuario: Usuario) -> Usuario:
+    async def adicionar(self, usuario: Usuario) -> Usuario:
         m = UsuarioModel(
             nome=usuario.nome,
             email=usuario.email,
@@ -43,10 +43,12 @@ class SqlAlchemyUsuarioRepository:
             ativo=usuario.ativo,
         )
         self._s.add(m)
-        self._s.flush()
+        await self._s.flush()
         return _to_entity(m)
 
-    def listar(self, filtros: FiltrosUsuario, limit: int, offset: int) -> tuple[list[Usuario], int]:
+    async def listar(
+        self, filtros: FiltrosUsuario, limit: int, offset: int
+    ) -> tuple[list[Usuario], int]:
         condicoes: list[ColumnElement[bool]] = []
         if filtros.ativo is not None:
             condicoes.append(UsuarioModel.ativo.is_(filtros.ativo))
@@ -60,18 +62,20 @@ class SqlAlchemyUsuarioRepository:
                     UsuarioModel.email.ilike(padrao, escape="\\"),
                 )
             )
-        total = self._s.scalar(select(func.count()).select_from(UsuarioModel).where(*condicoes))
-        itens = self._s.scalars(
+        total = await self._s.scalar(
+            select(func.count()).select_from(UsuarioModel).where(*condicoes)
+        )
+        resultado = await self._s.scalars(
             select(UsuarioModel)
             .where(*condicoes)
             .order_by(UsuarioModel.id)
             .limit(limit)
             .offset(offset)
-        ).all()
-        return [_to_entity(m) for m in itens], total or 0
+        )
+        return [_to_entity(m) for m in resultado.all()], total or 0
 
-    def atualizar(self, usuario: Usuario) -> Usuario:
-        m = self._s.get(UsuarioModel, usuario.id_persistido)
+    async def atualizar(self, usuario: Usuario) -> Usuario:
+        m = await self._s.get(UsuarioModel, usuario.id_persistido)
         if m is None:
             raise ValueError("Usuário não existe")
         m.nome = usuario.nome
@@ -79,11 +83,11 @@ class SqlAlchemyUsuarioRepository:
         m.senha_hash = usuario.senha_hash
         m.papel = str(usuario.papel)
         m.ativo = usuario.ativo
-        self._s.flush()
+        await self._s.flush()
         return _to_entity(m)
 
-    def contar_admins_ativos(self) -> int:
-        total = self._s.scalar(
+    async def contar_admins_ativos(self) -> int:
+        total = await self._s.scalar(
             select(func.count())
             .select_from(UsuarioModel)
             .where(UsuarioModel.papel == str(Papel.ADMIN), UsuarioModel.ativo.is_(True))

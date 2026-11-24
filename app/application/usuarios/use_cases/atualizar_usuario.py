@@ -14,7 +14,7 @@ class AtualizarUsuario:
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 
-    def executar(
+    async def executar(
         self,
         ator: Usuario,
         usuario_id: int,
@@ -24,21 +24,21 @@ class AtualizarUsuario:
     ) -> Usuario:
         if ator.papel is not Papel.ADMIN:
             raise PermissaoNegada
-        usuario = self._uow.usuarios.obter_por_id(usuario_id)
+        usuario = await self._uow.usuarios.obter_por_id(usuario_id)
         if usuario is None:
             raise UsuarioNaoEncontrado
 
         if papel is not None and usuario.papel is Papel.ADMIN and papel is not Papel.ADMIN:
             if usuario.id == ator.id:
                 raise OperacaoNaoPermitida("auto_rebaixamento")
-            if usuario.ativo and self._uow.usuarios.contar_admins_ativos() <= 1:
+            if usuario.ativo and await self._uow.usuarios.contar_admins_ativos() <= 1:
                 raise OperacaoNaoPermitida("ultimo_admin")
 
         email = email.lower() if email is not None else None
         if (
             email is not None
             and email != usuario.email
-            and self._uow.usuarios.obter_por_email(email) is not None
+            and await self._uow.usuarios.obter_por_email(email) is not None
         ):
             raise EmailJaCadastrado
 
@@ -51,9 +51,9 @@ class AtualizarUsuario:
         if not diff:
             return usuario
 
-        atualizado = self._uow.usuarios.atualizar(usuario)
-        self._uow.auditoria.registrar(
+        atualizado = await self._uow.usuarios.atualizar(usuario)
+        await self._uow.auditoria.registrar(
             ator.id_persistido, "atualizar", "usuario", str(usuario_id), diff
         )
-        self._uow.commit()
+        await self._uow.commit()
         return atualizado

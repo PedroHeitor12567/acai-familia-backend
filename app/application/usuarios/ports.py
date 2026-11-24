@@ -1,0 +1,9 @@
+from typing import Protocol
+
+from app.domain.usuarios.entities import Usuario
+
+
+class UsuarioRepository(Protocol):
+    def obter_por_email(self, email: str) -> Usuario | None: ...
+    def obter_por_id(self, usuario_id: int) -> Usuario | None: ...
+    def adicionar(self, usuario: Usuario) -> Usuario: ...

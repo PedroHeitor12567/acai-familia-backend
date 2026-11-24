@@ -1,6 +1,6 @@
 import pytest
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.usuarios.entities import Papel, Usuario
 from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuarioRepository
@@ -8,24 +8,24 @@ from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuario
 pytestmark = pytest.mark.postgres
 
 
-def test_pg_session_grava_e_le_usuario(pg_session: Session) -> None:
+async def test_pg_session_grava_e_le_usuario(pg_session: AsyncSession) -> None:
     repo = SqlAlchemyUsuarioRepository(pg_session)
 
-    criado = repo.adicionar(
+    criado = await repo.adicionar(
         Usuario(nome="Fumaça", email="fumaca@pg.example.com", senha_hash="x", papel=Papel.ATENDENTE)
     )
-    pg_session.commit()  # vira savepoint; o rollback da fixture desfaz
+    await pg_session.commit()  # vira savepoint; o rollback da fixture desfaz
 
-    lido = repo.obter_por_email("fumaca@pg.example.com")
+    lido = await repo.obter_por_email("fumaca@pg.example.com")
     assert lido is not None
     assert lido.id == criado.id
     assert lido.papel is Papel.ATENDENTE
 
 
-def test_pg_session_isola_testes_e_usa_postgresql(pg_session: Session) -> None:
+async def test_pg_session_isola_testes_e_usa_postgresql(pg_session: AsyncSession) -> None:
     assert pg_session.get_bind().dialect.name == "postgresql"
     # o usuário do teste anterior foi desfeito pelo rollback da fixture
-    existe = pg_session.scalar(
+    existe = await pg_session.scalar(
         text("select count(*) from usuarios where email = 'fumaca@pg.example.com'")
     )
     assert existe == 0

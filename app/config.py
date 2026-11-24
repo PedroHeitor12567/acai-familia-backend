@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PREFIXO_SEGREDO_EXEMPLO = "troque-por"  # valor placeholder do .env.example
@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_lockout_seconds: int = 300
     max_body_bytes: int = 1_000_000
+
+    @field_validator("database_url")
+    @classmethod
+    def _driver_assincrono(cls, url: str) -> str:
+        """A API é assíncrona: URLs sem driver (ou com psycopg) passam a usar asyncpg."""
+        for prefixo in ("postgresql://", "postgres://", "postgresql+psycopg://"):
+            if url.startswith(prefixo):
+                return "postgresql+asyncpg://" + url[len(prefixo) :]
+        return url
 
     @property
     def is_production(self) -> bool:

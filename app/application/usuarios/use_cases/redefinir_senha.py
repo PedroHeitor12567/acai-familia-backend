@@ -11,19 +11,19 @@ class RedefinirSenha:
         self._uow = uow
         self._hasher = hasher
 
-    def executar(self, ator: Usuario, usuario_id: int, nova_senha: str) -> None:
+    async def executar(self, ator: Usuario, usuario_id: int, nova_senha: str) -> None:
         if ator.papel is not Papel.ADMIN:
             raise PermissaoNegada
-        usuario = self._uow.usuarios.obter_por_id(usuario_id)
+        usuario = await self._uow.usuarios.obter_por_id(usuario_id)
         if usuario is None:
             raise UsuarioNaoEncontrado
-        usuario.senha_hash = self._hasher.hash(nova_senha)
-        self._uow.usuarios.atualizar(usuario)
-        self._uow.auditoria.registrar(
+        usuario.senha_hash = await self._hasher.hash(nova_senha)
+        await self._uow.usuarios.atualizar(usuario)
+        await self._uow.auditoria.registrar(
             ator.id_persistido,
             "redefinir_senha",
             "usuario",
             str(usuario_id),
             {"campos": ["senha"]},
         )
-        self._uow.commit()
+        await self._uow.commit()

@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence.auditoria.repository import SqlAlchemyAuditoria
 from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuarioRepository
@@ -7,13 +7,13 @@ from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuario
 class SqlAlchemyUnitOfWork:
     """Todos os repositórios compartilham a mesma sessão (= mesma transação)."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._s = session
         self.usuarios = SqlAlchemyUsuarioRepository(session)
         self.auditoria = SqlAlchemyAuditoria(session)
 
-    def commit(self) -> None:
-        self._s.commit()
+    async def commit(self) -> None:
+        await self._s.commit()
 
-    def rollback(self) -> None:
-        self._s.rollback()
+    async def rollback(self) -> None:
+        await self._s.rollback()

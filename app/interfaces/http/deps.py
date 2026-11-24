@@ -4,14 +4,26 @@ from typing import Annotated
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.application.usuarios.use_cases.alterar_propria_senha import AlterarPropriaSenha
+from app.application.usuarios.use_cases.alterar_status_usuario import AlterarStatusUsuario
+from app.application.usuarios.use_cases.atualizar_usuario import AtualizarUsuario
 from app.application.usuarios.use_cases.autenticar_usuario import AutenticarUsuario
 from app.application.usuarios.use_cases.criar_usuario import CriarUsuario
+from app.application.usuarios.use_cases.listar_usuarios import ListarUsuarios
+from app.application.usuarios.use_cases.obter_usuario import ObterUsuario
+from app.application.usuarios.use_cases.redefinir_senha import RedefinirSenha
 from app.application.usuarios.use_cases.renovar_token import RenovarToken
 from app.bootstrap.container import (
     TokensDep,
     UowDep,
+    get_alterar_propria_senha,
+    get_alterar_status_usuario,
+    get_atualizar_usuario,
     get_autenticar_usuario,
     get_criar_usuario,
+    get_listar_usuarios,
+    get_obter_usuario,
+    get_redefinir_senha,
     get_renovar_token,
 )
 from app.domain.exceptions import PermissaoNegada, TokenInvalido
@@ -22,6 +34,12 @@ _bearer = HTTPBearer(auto_error=False)
 AutenticarUsuarioDep = Annotated[AutenticarUsuario, Depends(get_autenticar_usuario)]
 RenovarTokenDep = Annotated[RenovarToken, Depends(get_renovar_token)]
 CriarUsuarioDep = Annotated[CriarUsuario, Depends(get_criar_usuario)]
+ListarUsuariosDep = Annotated[ListarUsuarios, Depends(get_listar_usuarios)]
+ObterUsuarioDep = Annotated[ObterUsuario, Depends(get_obter_usuario)]
+AtualizarUsuarioDep = Annotated[AtualizarUsuario, Depends(get_atualizar_usuario)]
+AlterarStatusUsuarioDep = Annotated[AlterarStatusUsuario, Depends(get_alterar_status_usuario)]
+AlterarPropriaSenhaDep = Annotated[AlterarPropriaSenha, Depends(get_alterar_propria_senha)]
+RedefinirSenhaDep = Annotated[RedefinirSenha, Depends(get_redefinir_senha)]
 
 
 def get_current_user(

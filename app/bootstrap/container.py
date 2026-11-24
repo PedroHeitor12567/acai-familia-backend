@@ -12,8 +12,14 @@ from sqlalchemy.orm import Session
 
 from app.application.seguranca.ports import LoginThrottle, PasswordHasher, TokenService
 from app.application.unit_of_work import UnitOfWork
+from app.application.usuarios.use_cases.alterar_propria_senha import AlterarPropriaSenha
+from app.application.usuarios.use_cases.alterar_status_usuario import AlterarStatusUsuario
+from app.application.usuarios.use_cases.atualizar_usuario import AtualizarUsuario
 from app.application.usuarios.use_cases.autenticar_usuario import AutenticarUsuario
 from app.application.usuarios.use_cases.criar_usuario import CriarUsuario
+from app.application.usuarios.use_cases.listar_usuarios import ListarUsuarios
+from app.application.usuarios.use_cases.obter_usuario import ObterUsuario
+from app.application.usuarios.use_cases.redefinir_senha import RedefinirSenha
 from app.application.usuarios.use_cases.renovar_token import RenovarToken
 from app.config import Settings, get_settings
 from app.infrastructure.persistence.session import get_session, get_session_factory
@@ -94,3 +100,29 @@ def get_renovar_token(uow: UowDep, tokens: TokensDep) -> RenovarToken:
 
 def get_criar_usuario(uow: UowDep) -> CriarUsuario:
     return CriarUsuario(uow, get_hasher())
+
+
+def get_listar_usuarios(uow: UowDep) -> ListarUsuarios:
+    return ListarUsuarios(uow)
+
+
+def get_obter_usuario(uow: UowDep) -> ObterUsuario:
+    return ObterUsuario(uow)
+
+
+def get_atualizar_usuario(uow: UowDep) -> AtualizarUsuario:
+    return AtualizarUsuario(uow)
+
+
+def get_alterar_status_usuario(uow: UowDep) -> AlterarStatusUsuario:
+    return AlterarStatusUsuario(uow)
+
+
+def get_alterar_propria_senha(
+    uow: UowDep, throttle: Annotated[LoginThrottle, Depends(get_throttle)]
+) -> AlterarPropriaSenha:
+    return AlterarPropriaSenha(uow, get_hasher(), throttle)
+
+
+def get_redefinir_senha(uow: UowDep) -> RedefinirSenha:
+    return RedefinirSenha(uow, get_hasher())

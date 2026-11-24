@@ -1,10 +1,13 @@
+from collections.abc import Callable
+
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.domain.usuarios.entities import Papel
-from tests.conftest import SENHA
+from tests.conftest import SENHA, AuthHeaders
 
 
-def _login(client: TestClient, email: str, senha: str = SENHA):  # type: ignore[no-untyped-def]
+def _login(client: TestClient, email: str, senha: str = SENHA) -> Response:
     return client.post("/auth/login", json={"email": email, "senha": senha})
 
 
@@ -14,7 +17,9 @@ def test_health(client: TestClient) -> None:
     assert r.headers["x-content-type-options"] == "nosniff"
 
 
-def test_login_me_e_refresh(client: TestClient, criar_usuario) -> None:  # type: ignore[no-untyped-def]
+def test_login_me_e_refresh(
+    client: TestClient, criar_usuario: Callable[[str, Papel], None]
+) -> None:
     criar_usuario("admin@acai.com", Papel.ADMIN)
     r = _login(client, "admin@acai.com")
     assert r.status_code == 200
@@ -25,7 +30,9 @@ def test_login_me_e_refresh(client: TestClient, criar_usuario) -> None:  # type:
     assert novo.status_code == 200
 
 
-def test_refresh_nao_serve_como_access(client: TestClient, criar_usuario) -> None:  # type: ignore[no-untyped-def]
+def test_refresh_nao_serve_como_access(
+    client: TestClient, criar_usuario: Callable[[str, Papel], None]
+) -> None:
     criar_usuario("a@acai.com", Papel.ADMIN)
     tokens = _login(client, "a@acai.com").json()
     r = client.get("/auth/me", headers={"Authorization": f"Bearer {tokens['refresh_token']}"})
@@ -33,8 +40,8 @@ def test_refresh_nao_serve_como_access(client: TestClient, criar_usuario) -> Non
 
 
 def test_senha_errada_e_usuario_inexistente_mesma_resposta(
-    client: TestClient, criar_usuario
-) -> None:  # type: ignore[no-untyped-def]
+    client: TestClient, criar_usuario: Callable[[str, Papel], None]
+) -> None:
     criar_usuario("a@acai.com", Papel.ADMIN)
     r1 = _login(client, "a@acai.com", "errada-errada")
     r2 = _login(client, "ninguem@acai.com")
@@ -42,7 +49,9 @@ def test_senha_errada_e_usuario_inexistente_mesma_resposta(
     assert r1.json() == r2.json()
 
 
-def test_bloqueio_apos_tentativas(client: TestClient, criar_usuario) -> None:  # type: ignore[no-untyped-def]
+def test_bloqueio_apos_tentativas(
+    client: TestClient, criar_usuario: Callable[[str, Papel], None]
+) -> None:
     criar_usuario("a@acai.com", Papel.ADMIN)
     for _ in range(5):
         assert _login(client, "a@acai.com", "errada-errada").status_code == 401
@@ -55,9 +64,7 @@ def test_sem_token_401(client: TestClient) -> None:
     assert client.get("/auth/me").status_code == 401
 
 
-def test_apenas_admin_cria_usuario(client: TestClient, criar_usuario) -> None:  # type: ignore[no-untyped-def]
-    criar_usuario("adm@acai.com", Papel.ADMIN)
-    criar_usuario("atd@acai.com", Papel.ATENDENTE)
+def test_apenas_admin_cria_usuario(client: TestClient, auth_headers: AuthHeaders) -> None:
     payload = {
         "nome": "Novo",
         "email": "novo@acai.com",
@@ -65,12 +72,11 @@ def test_apenas_admin_cria_usuario(client: TestClient, criar_usuario) -> None:  
         "papel": "caixa",
     }
 
-    tk_atd = _login(client, "atd@acai.com").json()["access_token"]
-    r = client.post("/usuarios", json=payload, headers={"Authorization": f"Bearer {tk_atd}"})
+    h_atd = auth_headers("atd@acai.com", Papel.ATENDENTE)
+    r = client.post("/usuarios", json=payload, headers=h_atd)
     assert r.status_code == 403
 
-    tk_adm = _login(client, "adm@acai.com").json()["access_token"]
-    h = {"Authorization": f"Bearer {tk_adm}"}
+    h = auth_headers("adm@acai.com", Papel.ADMIN)
     assert client.post("/usuarios", json=payload, headers=h).status_code == 201
     assert client.post("/usuarios", json=payload, headers=h).status_code == 409
 

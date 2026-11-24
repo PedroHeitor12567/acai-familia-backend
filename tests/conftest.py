@@ -22,6 +22,9 @@ from app.main import create_app  # noqa: E402
 
 SENHA = "senha-forte-123"
 
+# (email, papel) -> {"Authorization": "Bearer ..."}; ver a fixture `auth_headers`.
+AuthHeaders = Callable[[str, Papel], dict[str, str]]
+
 
 @pytest.fixture
 def factory() -> Iterator[sessionmaker[Session]]:
@@ -62,6 +65,19 @@ def criar_usuario(factory: sessionmaker[Session]) -> Callable[[str, Papel], None
 
 
 @pytest.fixture
+def auth_headers(client: TestClient, criar_usuario: Callable[[str, Papel], None]) -> AuthHeaders:
+    """Cria o usuário (senha `SENHA`), faz login e devolve o header `Authorization`."""
+
+    def _headers(email: str, papel: Papel) -> dict[str, str]:
+        criar_usuario(email, papel)
+        r = client.post("/auth/login", json={"email": email, "senha": SENHA})
+        assert r.status_code == 200, r.text
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    return _headers
+
+
+@pytest.fixture
 def pg_session() -> Iterator[Session]:
     """Sessão em PostgreSQL real (schema já migrado pelo Alembic), isolada por rollback."""
     url = os.environ.get("TEST_DATABASE_URL")
@@ -80,3 +96,19 @@ def pg_session() -> Iterator[Session]:
         trans.rollback()
         conn.close()
         engine.dispose()
+
+
+@pytest.fixture
+def pg_client(pg_session: Session) -> TestClient:
+    """API completa sobre o PostgreSQL migrado pelo Alembic (sem `create_all`).
+
+    Todas as requisições usam a `pg_session`, então o que o teste grava some no rollback final.
+    """
+    app = create_app()
+
+    def _db() -> Iterator[Session]:
+        yield pg_session
+
+    app.dependency_overrides[get_db] = _db
+    get_login_throttle().zerar_tudo()
+    return TestClient(app)

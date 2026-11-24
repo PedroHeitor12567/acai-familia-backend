@@ -63,6 +63,19 @@ Cada teste roda numa transação com rollback no final (fixture `pg_session`). O
 PostgreSQL 16, roda `alembic upgrade head`, `alembic check` (falha se um model divergir das
 migrations) e então os testes.
 
+### Onde colocar cada teste
+
+| Tipo | Pasta | Banco |
+|---|---|---|
+| Unitário (regra de negócio, sem I/O de rede) | `tests/unit` | SQLite em memória |
+| API (rotas, permissões, validação) | `tests/integration` | SQLite em memória |
+| Fluxo ponta a ponta (`@pytest.mark.postgres`) | `tests/e2e` | PostgreSQL migrado pelo Alembic |
+
+Helpers em `tests/conftest.py`: `auth_headers(email, papel)` cria o usuário, faz login e devolve o
+header `Authorization` (use em vez de repetir login nos testes de API); `pg_client` é a API
+completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no formato de
+`tests/e2e/test_fluxo_usuarios.py`.
+
 ## Já incluído
 - Login com JWT (access 15 min + refresh), senha em argon2, resposta uniforme contra enumeração
 - Papéis (admin, gerente, atendente, caixa) via `require_roles`

@@ -45,6 +45,24 @@ Outras tarefas: `uv run task --list` (`test`, `lint`, `fmt`, `types`, `sec`, `ch
 ruff check . && ruff format --check . && mypy app && pytest -q && bandit -c pyproject.toml -r app -q && pip-audit
 ```
 
+### Testes com PostgreSQL
+
+Por padrão os testes rodam em SQLite em memória (rápidos, sem Docker). Os testes marcados com
+`@pytest.mark.postgres` precisam de um PostgreSQL real com o schema **migrado pelo Alembic** e só
+rodam quando `TEST_DATABASE_URL` está definida; sem ela são *skipped*.
+
+```bash
+uv run task db        # sobe o PostgreSQL (docker compose)
+DATABASE_URL=postgresql+psycopg://acai:acai@localhost:5432/acai uv run task migrate
+export TEST_DATABASE_URL=postgresql+psycopg://acai:acai@localhost:5432/acai
+uv run pytest -q -m postgres
+```
+
+No PowerShell: `$env:TEST_DATABASE_URL = "postgresql+psycopg://acai:acai@localhost:5432/acai"`.
+Cada teste roda numa transação com rollback no final (fixture `pg_session`). O CI sobe o
+PostgreSQL 16, roda `alembic upgrade head`, `alembic check` (falha se um model divergir das
+migrations) e então os testes.
+
 ## Já incluído
 - Login com JWT (access 15 min + refresh), senha em argon2, resposta uniforme contra enumeração
 - Papéis (admin, gerente, atendente, caixa) via `require_roles`

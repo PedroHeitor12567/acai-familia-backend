@@ -69,6 +69,25 @@ migrations) e então os testes.
 - Rate limit de login (em memória; usar Redis com várias réplicas)
 - Auditoria (`audit_log`), headers de segurança, CORS por lista, limite de body, docs off em produção
 - Unit of Work, Alembic, Docker não-root, CI
+- Gestão de usuários:
+
+  | Rota | Quem | |
+  |---|---|---|
+  | `GET /usuarios` | admin, gerente | lista paginada (`limit` padrão 20, máx. 100; `offset`) com filtros `ativo`, `papel`, `q` |
+  | `GET /usuarios/{id}` | admin, gerente | detalhe |
+  | `PATCH /usuarios/{id}` | admin | edita `nome`, `email`, `papel` |
+  | `POST /usuarios/{id}/desativar` · `/reativar` | admin | liga/desliga o acesso |
+  | `POST /usuarios/{id}/redefinir-senha` | admin | define nova senha de outro usuário |
+  | `POST /auth/alterar-senha` | qualquer autenticado | troca a própria senha (exige a atual; com limite de tentativas) |
+
+  Regras: sempre resta ao menos um admin ativo; admin não desativa nem rebaixa a si mesmo;
+  e-mail único (minúsculas); toda mutação é auditada só com o diff dos campos, sem senha nem hash.
+
+### Limitação conhecida: senha e refresh token
+
+Enquanto a revogação de refresh token não existir (Fase 6), **trocar ou redefinir a senha não
+invalida os tokens já emitidos**: o access vale até 15 min e o refresh até 7 dias. Já **desativar o
+usuário corta o acesso na hora**, porque `ativo` é checado a cada requisição (e no refresh).
 
 ## Próximos passos
 1. Cardápio, estoque e comandas (transações + `SELECT ... FOR UPDATE` na baixa de estoque)

@@ -5,9 +5,19 @@ from app.domain.exceptions import (
     CredenciaisInvalidas,
     EmailJaCadastrado,
     MuitasTentativas,
+    OperacaoNaoPermitida,
     PermissaoNegada,
+    SenhaAtualIncorreta,
     TokenInvalido,
+    UsuarioNaoEncontrado,
 )
+
+_MOTIVOS_OPERACAO = {
+    "ultimo_admin": "Deve existir ao menos um administrador ativo",
+    "auto_desativacao": "Você não pode desativar a si mesmo; peça a outro administrador",
+    "auto_rebaixamento": "Você não pode rebaixar o próprio papel; peça a outro administrador",
+    "senha_igual_a_atual": "A nova senha deve ser diferente da atual",
+}
 
 
 def _resp(status: int, code: str, msg: str, headers: dict[str, str] | None = None) -> JSONResponse:
@@ -42,3 +52,19 @@ def register_error_handlers(app: FastAPI) -> None:
             "Muitas tentativas. Tente novamente mais tarde.",
             {"Retry-After": str(exc.retry_after)},
         )
+
+    @app.exception_handler(UsuarioNaoEncontrado)
+    async def _nao_encontrado(_: Request, __: UsuarioNaoEncontrado) -> JSONResponse:
+        return _resp(404, "usuario_nao_encontrado", "Usuário não encontrado")
+
+    @app.exception_handler(OperacaoNaoPermitida)
+    async def _operacao(_: Request, exc: OperacaoNaoPermitida) -> JSONResponse:
+        return _resp(
+            409,
+            "operacao_nao_permitida",
+            _MOTIVOS_OPERACAO.get(exc.motivo, "Operação não permitida"),
+        )
+
+    @app.exception_handler(SenhaAtualIncorreta)
+    async def _senha_atual(_: Request, __: SenhaAtualIncorreta) -> JSONResponse:
+        return _resp(400, "senha_atual_incorreta", "Senha atual incorreta")

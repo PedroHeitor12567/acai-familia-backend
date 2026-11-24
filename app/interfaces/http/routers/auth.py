@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response, status
 
-from app.interfaces.http.deps import AutenticarUsuarioDep, CurrentUser, RenovarTokenDep
+from app.interfaces.http.deps import (
+    AlterarPropriaSenhaDep,
+    AutenticarUsuarioDep,
+    CurrentUser,
+    RenovarTokenDep,
+)
 from app.interfaces.http.schemas.auth import LoginIn, RefreshIn, TokenOut
-from app.interfaces.http.schemas.usuarios import UsuarioOut
+from app.interfaces.http.schemas.usuarios import AlterarSenhaIn, UsuarioOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -23,3 +28,11 @@ def refresh(body: RefreshIn, caso: RenovarTokenDep) -> TokenOut:
 @router.get("/me", response_model=UsuarioOut)
 def me(usuario: CurrentUser) -> UsuarioOut:
     return UsuarioOut.de_entidade(usuario)
+
+
+@router.post("/alterar-senha", status_code=status.HTTP_204_NO_CONTENT)
+def alterar_senha(
+    body: AlterarSenhaIn, usuario: CurrentUser, caso: AlterarPropriaSenhaDep
+) -> Response:
+    caso.executar(usuario, body.senha_atual, body.nova_senha)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

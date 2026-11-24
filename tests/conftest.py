@@ -59,3 +59,24 @@ def criar_usuario(factory: sessionmaker[Session]) -> Callable[[str, Papel], None
             s.commit()
 
     return _criar
+
+
+@pytest.fixture
+def pg_session() -> Iterator[Session]:
+    """Sessão em PostgreSQL real (schema já migrado pelo Alembic), isolada por rollback."""
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL não definida")
+    engine = create_engine(url)
+    conn = engine.connect()
+    trans = conn.begin()
+    # create_savepoint: commits feitos pelo código testado viram savepoints e o
+    # rollback final da transação externa desfaz tudo.
+    session = Session(bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False)
+    try:
+        yield session
+    finally:
+        session.close()
+        trans.rollback()
+        conn.close()
+        engine.dispose()

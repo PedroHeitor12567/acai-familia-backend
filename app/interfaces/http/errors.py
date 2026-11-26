@@ -4,12 +4,17 @@ from fastapi.responses import JSONResponse
 from app.domain.exceptions import (
     CredenciaisInvalidas,
     EmailJaCadastrado,
+    EstoqueInsuficiente,
+    FichaTecnicaInvalida,
     MuitasTentativas,
+    NaoEncontrado,
+    NomeJaCadastrado,
     OperacaoNaoPermitida,
     PermissaoNegada,
     SenhaAtualIncorreta,
     TokenInvalido,
     UsuarioNaoEncontrado,
+    ValorInvalido,
 )
 
 _MOTIVOS_OPERACAO = {
@@ -17,6 +22,32 @@ _MOTIVOS_OPERACAO = {
     "auto_desativacao": "Você não pode desativar a si mesmo; peça a outro administrador",
     "auto_rebaixamento": "Você não pode rebaixar o próprio papel; peça a outro administrador",
     "senha_igual_a_atual": "A nova senha deve ser diferente da atual",
+    "categoria_inativa": "A categoria está inativa",
+    "tamanho_inativo": "O tamanho está inativo",
+    "insumo_inativo": "O insumo está inativo",
+}
+
+_MOTIVOS_VALOR = {
+    "preco_invalido": "Preço inválido: use valor >= 0 com até 2 casas decimais",
+    "quantidade_invalida": "Quantidade inválida: use valor > 0 com até 3 casas decimais",
+    "ajuste_sem_diferenca": "A contagem informada é igual ao saldo atual; nada a ajustar",
+}
+
+_MOTIVOS_FICHA = {
+    "insumo_repetido": "O mesmo insumo aparece mais de uma vez na ficha técnica",
+    "insumo_inexistente": "A ficha técnica referencia um insumo que não existe",
+    "insumo_inativo": "A ficha técnica referencia um insumo inativo",
+    "produto_inativo": "O produto está inativo",
+    "adicional_inativo": "O adicional está inativo",
+    "produto_sem_tamanho": "O produto não tem preço definido para este tamanho",
+}
+
+_ENTIDADES = {
+    "categoria": "Já existe uma categoria com este nome",
+    "tamanho": "Já existe um tamanho com este nome",
+    "adicional": "Já existe um adicional com este nome",
+    "insumo": "Já existe um insumo com este nome",
+    "produto": "Já existe um produto com este nome nesta categoria",
 }
 
 
@@ -68,3 +99,31 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(SenhaAtualIncorreta)
     async def _senha_atual(_: Request, __: SenhaAtualIncorreta) -> JSONResponse:
         return _resp(400, "senha_atual_incorreta", "Senha atual incorreta")
+
+    @app.exception_handler(NaoEncontrado)
+    async def _recurso_nao_encontrado(_: Request, exc: NaoEncontrado) -> JSONResponse:
+        return _resp(404, exc.code, exc.mensagem)
+
+    @app.exception_handler(NomeJaCadastrado)
+    async def _nome_duplicado(_: Request, exc: NomeJaCadastrado) -> JSONResponse:
+        return _resp(409, "nome_ja_cadastrado", _ENTIDADES.get(exc.entidade, "Nome já cadastrado"))
+
+    @app.exception_handler(ValorInvalido)
+    async def _valor_invalido(_: Request, exc: ValorInvalido) -> JSONResponse:
+        return _resp(422, "valor_invalido", _MOTIVOS_VALOR.get(exc.motivo, "Valor inválido"))
+
+    @app.exception_handler(EstoqueInsuficiente)
+    async def _estoque_insuficiente(_: Request, exc: EstoqueInsuficiente) -> JSONResponse:
+        return _resp(
+            422,
+            "estoque_insuficiente",
+            f"Estoque insuficiente: disponível {exc.disponivel}, solicitado {exc.solicitado}",
+        )
+
+    @app.exception_handler(FichaTecnicaInvalida)
+    async def _ficha_invalida(_: Request, exc: FichaTecnicaInvalida) -> JSONResponse:
+        return _resp(
+            422,
+            "ficha_tecnica_invalida",
+            _MOTIVOS_FICHA.get(exc.motivo, "Ficha técnica inválida"),
+        )

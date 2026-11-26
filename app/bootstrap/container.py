@@ -3,9 +3,9 @@
 Routers e casos de uso nunca importam `infrastructure`; recebem o que este módulo monta.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, TypeVar
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +87,17 @@ def get_throttle() -> LoginThrottle:
 
 UowDep = Annotated[UnitOfWork, Depends(get_uow)]
 TokensDep = Annotated[TokenService, Depends(get_token_service)]
+
+_Caso = TypeVar("_Caso")
+
+
+def caso_de_uso(caso: Callable[[UnitOfWork], _Caso]) -> Callable[[UowDep], _Caso]:
+    """Provider FastAPI de um caso de uso que só depende da UoW (cardápio e estoque)."""
+
+    def provider(uow: UowDep) -> _Caso:
+        return caso(uow)
+
+    return provider
 
 
 def get_autenticar_usuario(

@@ -102,6 +102,50 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
   Regras: sempre resta ao menos um admin ativo; admin não desativa nem rebaixa a si mesmo;
   e-mail único (minúsculas); toda mutação é auditada só com o diff dos campos, sem senha nem hash.
 
+- Cardápio (`domain/cardapio`): leitura para qualquer usuário autenticado, escrita só admin/gerente.
+
+  | Rota | |
+  |---|---|
+  | `GET/POST /categorias` · `GET/PATCH /categorias/{id}` | nome único (sem diferenciar maiúsculas) |
+  | `GET/POST /tamanhos` · `PATCH /tamanhos/{id}` | variações de venda (300 ml, 500 ml...); use um tamanho "Único" para produtos sem variação |
+  | `GET/POST /adicionais` · `PATCH /adicionais/{id}` | nome e preço próprios |
+  | `GET/POST /produtos` (filtros `categoria_id`, `ativo`, `q`) · `GET/PATCH /produtos/{id}` | nome único dentro da categoria; a resposta traz `precos` por tamanho |
+  | `PUT /produtos/{id}/tamanhos/{tamanho_id}` | define ou reajusta o preço do produto naquele tamanho |
+  | `POST /{categorias,tamanhos,adicionais,produtos}/{id}/ativar` · `/desativar` | *soft delete*: item inativo some da venda mas continua referenciável por comandas antigas |
+
+  Preço é `Decimal` no domínio e `Numeric(12,2)` no banco (`CHECK preco >= 0`), nunca `float`; na API
+  vai e volta como string (`"18.90"`).
+- Estoque (`domain/estoque`): **tudo restrito a admin e gerente**.
+
+  | Rota | |
+  |---|---|
+  | `GET/POST /estoque/insumos` (filtros `abaixo_do_minimo`, `ativo`, `q`) · `GET/PATCH /estoque/insumos/{id}` | unidade fixa (`g`, `kg`, `ml`, `l`, `un`), sem conversão; o saldo nasce em zero e só muda por movimentação |
+  | `POST /estoque/insumos/{id}/ativar` · `/desativar` | |
+  | `POST /estoque/insumos/{id}/movimentacoes` | `entrada` soma, `saida` subtrai, `ajuste` define o saldo (`quantidade` = contagem física) |
+  | `GET /estoque/insumos/{id}/movimentacoes` | histórico paginado, mais recentes primeiro, filtros `tipo`, `de`, `ate` |
+  | `GET /estoque/alertas` | insumos ativos com `estoque_atual <= estoque_minimo` (sem notificação ativa) |
+  | `GET/PUT /produtos/{id}/tamanhos/{tamanho_id}/ficha-tecnica` | receita por produto **e** tamanho; o PUT substitui tudo de forma atômica (lista vazia limpa) |
+  | `GET/PUT /adicionais/{id}/ficha-tecnica` | receita de um adicional (consumo por porção) |
+
+  Regras: quantidades são `Numeric(12,3)`; o histórico (`movimentacoes_estoque`) é imutável, sem
+  update nem delete, e guarda `saldo_antes`/`saldo_apos`; saída que deixaria o saldo negativo
+  responde 422 `estoque_insuficiente` e não grava nada; `ajuste` com a contagem igual ao saldo
+  é rejeitado (422 `valor_invalido`). Cada movimentação trava o insumo com `SELECT ... FOR UPDATE`
+  e grava histórico e saldo na mesma transação, então saídas simultâneas não corrompem o saldo.
+  Na ficha, o mesmo insumo não repete na receita e insumo/produto/adicional precisam estar ativos
+  e o produto precisa ter preço no tamanho.
+
+  **Para a Fase 2 (comandas):** `uow.estoque.aplicar_saida(insumo_id, quantidade, usuario_id, motivo)`
+  aplica a baixa na transação em andamento (quem chama decide o `commit`),
+  `uow.ficha_tecnica.obter_ficha_produto/obter_ficha_adicional` leem as receitas e
+  `domain.estoque.regras.calcular_consumo(ficha, quantidade_vendida)` devolve `{insumo_id: quantidade}`.
+
+Erros novos (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encontrado`,
+`tamanho_nao_encontrado`, `adicional_nao_encontrado`, `insumo_nao_encontrado` (404);
+`nome_ja_cadastrado` (409); `estoque_insuficiente`, `ficha_tecnica_invalida`, `valor_invalido` (422).
+Toda escrita é auditada (`criar`, `atualizar`, `ativar`/`desativar`, `definir_preco`, `movimentar`,
+`definir_ficha`).
+
 ### Limitação conhecida: senha e refresh token
 
 Enquanto a revogação de refresh token não existir (Fase 6), **trocar ou redefinir a senha não
@@ -109,7 +153,7 @@ invalida os tokens já emitidos**: o access vale até 15 min e o refresh até 7 
 usuário corta o acesso na hora**, porque `ativo` é checado a cada requisição (e no refresh).
 
 ## Próximos passos
-1. Cardápio, estoque e comandas (transações + `SELECT ... FOR UPDATE` na baixa de estoque)
+1. Comandas (consomem cardápio, preços e baixa de estoque; transação única no fechamento)
 2. Caixa e financeiro (`Numeric(12,2)`, nunca float)
 3. Dashboard (consultas de leitura)
 4. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,

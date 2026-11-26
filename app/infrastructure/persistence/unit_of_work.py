@@ -1,6 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence.auditoria.repository import SqlAlchemyAuditoria
+from app.infrastructure.persistence.cardapio.repository import SqlAlchemyCardapioRepository
+from app.infrastructure.persistence.estoque.repository import (
+    SqlAlchemyEstoqueRepository,
+    SqlAlchemyFichaTecnicaRepository,
+)
 from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuarioRepository
 
 
@@ -10,6 +15,9 @@ class SqlAlchemyUnitOfWork:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
         self.usuarios = SqlAlchemyUsuarioRepository(session)
+        self.cardapio = SqlAlchemyCardapioRepository(session)
+        self.estoque = SqlAlchemyEstoqueRepository(session)
+        self.ficha_tecnica = SqlAlchemyFichaTecnicaRepository(session)
         self.auditoria = SqlAlchemyAuditoria(session)
 
     async def commit(self) -> None:

@@ -4,11 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.usuarios.ports import FiltrosUsuario
 from app.domain.usuarios.entities import Papel, Usuario
 from app.infrastructure.persistence.usuarios.models import UsuarioModel
-
-
-def _escapar_like(texto: str) -> str:
-    """Neutraliza os curingas do LIKE para que `%` e `_` digitados sejam literais."""
-    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+from app.infrastructure.persistence.utils import escapar_like
 
 
 def _to_entity(m: UsuarioModel) -> Usuario:
@@ -55,7 +51,7 @@ class SqlAlchemyUsuarioRepository:
         if filtros.papel is not None:
             condicoes.append(UsuarioModel.papel == str(filtros.papel))
         if filtros.q:
-            padrao = f"%{_escapar_like(filtros.q)}%"
+            padrao = f"%{escapar_like(filtros.q)}%"
             condicoes.append(
                 or_(
                     UsuarioModel.nome.ilike(padrao, escape="\\"),

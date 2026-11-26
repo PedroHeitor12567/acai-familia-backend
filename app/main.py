@@ -6,6 +6,7 @@ from app.interfaces.http.middleware import register_middleware
 from app.interfaces.http.routers import (
     auth,
     cardapio,
+    comandas,
     estoque,
     health,
     usuarios,
@@ -25,7 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(usuarios.router)
-    for router in (*cardapio.routers, *estoque.routers):
+    for router in (*cardapio.routers, *estoque.routers, comandas.router):
         app.include_router(router)
     return app
 

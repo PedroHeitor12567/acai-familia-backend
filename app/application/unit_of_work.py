@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from app.application.cardapio.ports import CardapioRepository
+from app.application.comandas.ports import ComandaRepository
 from app.application.estoque.ports import EstoqueRepository, FichaTecnicaRepository
 from app.application.shared.ports import Auditoria
 from app.application.usuarios.ports import UsuarioRepository
@@ -19,6 +20,9 @@ class UnitOfWork(Protocol):
 
     @property
     def cardapio(self) -> CardapioRepository: ...
+
+    @property
+    def comandas(self) -> ComandaRepository: ...
 
     @property
     def estoque(self) -> EstoqueRepository: ...

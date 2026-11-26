@@ -31,6 +31,10 @@ from app.application.cardapio.use_cases.tamanhos import (
     CriarTamanho,
     ListarTamanhos,
 )
+from app.application.comandas.use_cases.abrir import AbrirComanda
+from app.application.comandas.use_cases.consulta import ListarComandas, ObterComanda
+from app.application.comandas.use_cases.fechamento import CancelarComanda, FecharComanda
+from app.application.comandas.use_cases.itens import AdicionarItem, AtualizarItem, RemoverItem
 from app.application.estoque.use_cases.ficha_tecnica import (
     DefinirFichaAdicional,
     DefinirFichaTecnica,
@@ -131,6 +135,16 @@ DefinirFichaAdicionalDep = Annotated[
 ]
 ObterFichaAdicionalDep = Annotated[ObterFichaAdicional, Depends(caso_de_uso(ObterFichaAdicional))]
 
+# --- comandas ---
+AbrirComandaDep = Annotated[AbrirComanda, Depends(caso_de_uso(AbrirComanda))]
+AdicionarItemDep = Annotated[AdicionarItem, Depends(caso_de_uso(AdicionarItem))]
+AtualizarItemDep = Annotated[AtualizarItem, Depends(caso_de_uso(AtualizarItem))]
+RemoverItemDep = Annotated[RemoverItem, Depends(caso_de_uso(RemoverItem))]
+ObterComandaDep = Annotated[ObterComanda, Depends(caso_de_uso(ObterComanda))]
+ListarComandasDep = Annotated[ListarComandas, Depends(caso_de_uso(ListarComandas))]
+FecharComandaDep = Annotated[FecharComanda, Depends(caso_de_uso(FecharComanda))]
+CancelarComandaDep = Annotated[CancelarComanda, Depends(caso_de_uso(CancelarComanda))]
+
 
 async def get_current_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
@@ -161,3 +175,10 @@ def require_roles(*papeis: Papel) -> Callable[[Usuario], Awaitable[Usuario]]:
 
 
 GestorDep = Annotated[Usuario, Depends(require_roles(Papel.ADMIN, Papel.GERENTE))]
+OperadorComandaDep = Annotated[
+    Usuario,
+    Depends(require_roles(Papel.ADMIN, Papel.GERENTE, Papel.ATENDENTE, Papel.CAIXA)),
+]
+FechamentoComandaDep = Annotated[
+    Usuario, Depends(require_roles(Papel.ADMIN, Papel.GERENTE, Papel.CAIXA))
+]

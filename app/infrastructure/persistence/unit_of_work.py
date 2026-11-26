@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.persistence.auditoria.repository import SqlAlchemyAuditoria
 from app.infrastructure.persistence.cardapio.repository import SqlAlchemyCardapioRepository
+from app.infrastructure.persistence.comandas.repository import SqlAlchemyComandaRepository
 from app.infrastructure.persistence.estoque.repository import (
     SqlAlchemyEstoqueRepository,
     SqlAlchemyFichaTecnicaRepository,
@@ -16,6 +17,7 @@ class SqlAlchemyUnitOfWork:
         self._s = session
         self.usuarios = SqlAlchemyUsuarioRepository(session)
         self.cardapio = SqlAlchemyCardapioRepository(session)
+        self.comandas = SqlAlchemyComandaRepository(session)
         self.estoque = SqlAlchemyEstoqueRepository(session)
         self.ficha_tecnica = SqlAlchemyFichaTecnicaRepository(session)
         self.auditoria = SqlAlchemyAuditoria(session)

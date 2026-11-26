@@ -148,7 +148,7 @@ def _alembic(*args: str, url: str) -> None:
     )
 
 
-async def test_migrations_0002_a_0004_aplicam_e_revertem() -> None:
+async def test_migrations_0002_a_0005_aplicam_e_revertem() -> None:
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL não definida")
@@ -162,6 +162,9 @@ async def test_migrations_0002_a_0004_aplicam_e_revertem() -> None:
         "movimentacoes_estoque",
         "itens_ficha_tecnica",
         "itens_ficha_adicional",
+        "comandas",
+        "itens_comanda",
+        "itens_comanda_adicional",
     }
     engine = create_async_engine(url)
     try:

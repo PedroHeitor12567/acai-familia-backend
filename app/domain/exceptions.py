@@ -66,6 +66,16 @@ class InsumoNaoEncontrado(NaoEncontrado):
     mensagem = "Insumo não encontrado"
 
 
+class ComandaNaoEncontrada(NaoEncontrado):
+    code = "comanda_nao_encontrada"
+    mensagem = "Comanda não encontrada"
+
+
+class ItemComandaNaoEncontrado(NaoEncontrado):
+    code = "item_comanda_nao_encontrado"
+    mensagem = "Item da comanda não encontrado"
+
+
 class NomeJaCadastrado(DomainError):
     """Nome duplicado (categoria, tamanho, adicional, insumo ou produto na mesma categoria)."""
 
@@ -83,10 +93,33 @@ class ValorInvalido(DomainError):
 
 
 class EstoqueInsuficiente(DomainError):
-    def __init__(self, disponivel: object, solicitado: object) -> None:
+    """Saldo menor que o pedido. `insumo_id`/`insumo_nome` dizem qual insumo faltou (quando
+    quem levanta sabe); os usos antigos, sem eles, continuam válidos."""
+
+    def __init__(
+        self,
+        disponivel: object,
+        solicitado: object,
+        insumo_id: int | None = None,
+        insumo_nome: str | None = None,
+    ) -> None:
         super().__init__(f"disponível {disponivel}, solicitado {solicitado}")
         self.disponivel = disponivel
         self.solicitado = solicitado
+        self.insumo_id = insumo_id
+        self.insumo_nome = insumo_nome
+
+
+class EstoqueInsuficienteNoFechamento(EstoqueInsuficiente):
+    """Falta de insumo ao fechar uma comanda: conflito com o estado do estoque (HTTP 409)."""
+
+
+class ItemComandaInvalido(DomainError):
+    """Item que não pode ser lançado (produto/tamanho/adicional inativo, sem preço...)."""
+
+    def __init__(self, motivo: str) -> None:
+        super().__init__(motivo)
+        self.motivo = motivo
 
 
 class FichaTecnicaInvalida(DomainError):

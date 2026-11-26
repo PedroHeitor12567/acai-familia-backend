@@ -5,7 +5,9 @@ from app.domain.exceptions import (
     CredenciaisInvalidas,
     EmailJaCadastrado,
     EstoqueInsuficiente,
+    EstoqueInsuficienteNoFechamento,
     FichaTecnicaInvalida,
+    ItemComandaInvalido,
     MuitasTentativas,
     NaoEncontrado,
     NomeJaCadastrado,
@@ -27,7 +29,18 @@ _MOTIVOS_OPERACAO = {
     "insumo_inativo": "O insumo está inativo",
 }
 
+# Motivos de comanda viram o próprio `code` da resposta (409), para o front reagir a cada um.
+_MOTIVOS_COMANDA = {
+    "comanda_nao_aberta": "A comanda não está aberta (já foi fechada ou cancelada)",
+    "comanda_vazia": "A comanda não tem itens; lance ao menos um item antes de fechar",
+}
+
 _MOTIVOS_VALOR = {
+    "cliente_nome_invalido": "Nome do cliente inválido: use de 1 a 120 caracteres",
+    "cliente_contato_invalido": "Contato inválido: use até 60 caracteres",
+    "observacao_invalida": "Observação inválida: use até 500 caracteres",
+    "motivo_invalido": "Motivo inválido: use até 255 caracteres",
+    "quantidade_item_invalida": "Quantidade inválida: use um número inteiro de 1 a 99",
     "preco_invalido": "Preço inválido: use valor >= 0 com até 2 casas decimais",
     "quantidade_invalida": "Quantidade inválida: use valor > 0 com até 3 casas decimais",
     "ajuste_sem_diferenca": "A contagem informada é igual ao saldo atual; nada a ajustar",
@@ -42,6 +55,14 @@ _MOTIVOS_FICHA = {
     "produto_sem_tamanho": "O produto não tem preço definido para este tamanho",
 }
 
+_MOTIVOS_ITEM = {
+    "produto_inativo": "O produto está inativo",
+    "tamanho_inativo": "O tamanho está inativo",
+    "adicional_inativo": "O adicional está inativo",
+    "produto_sem_preco": "O produto não tem preço definido para este tamanho",
+    "adicional_repetido": "O mesmo adicional aparece mais de uma vez no item",
+}
+
 _ENTIDADES = {
     "categoria": "Já existe uma categoria com este nome",
     "tamanho": "Já existe um tamanho com este nome",
@@ -51,9 +72,23 @@ _ENTIDADES = {
 }
 
 
-def _resp(status: int, code: str, msg: str, headers: dict[str, str] | None = None) -> JSONResponse:
-    """Formato único de erro: `code` estável para o front, `detail` em português."""
-    return JSONResponse(status_code=status, content={"code": code, "detail": msg}, headers=headers)
+def _resp(
+    status: int,
+    code: str,
+    msg: str,
+    headers: dict[str, str] | None = None,
+    extra: dict[str, object] | None = None,
+) -> JSONResponse:
+    """Formato único de erro: `code` estável para o front, `detail` em português.
+    `extra` acrescenta campos de contexto (ex.: qual insumo faltou)."""
+    return JSONResponse(
+        status_code=status, content={"code": code, "detail": msg, **(extra or {})}, headers=headers
+    )
+
+
+def _texto_estoque_insuficiente(exc: EstoqueInsuficiente) -> str:
+    quem = f" de {exc.insumo_nome}" if exc.insumo_nome else ""
+    return f"Estoque insuficiente{quem}: disponível {exc.disponivel}, solicitado {exc.solicitado}"
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -90,6 +125,8 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(OperacaoNaoPermitida)
     async def _operacao(_: Request, exc: OperacaoNaoPermitida) -> JSONResponse:
+        if exc.motivo in _MOTIVOS_COMANDA:
+            return _resp(409, exc.motivo, _MOTIVOS_COMANDA[exc.motivo])
         return _resp(
             409,
             "operacao_nao_permitida",
@@ -114,10 +151,23 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(EstoqueInsuficiente)
     async def _estoque_insuficiente(_: Request, exc: EstoqueInsuficiente) -> JSONResponse:
+        return _resp(422, "estoque_insuficiente", _texto_estoque_insuficiente(exc))
+
+    @app.exception_handler(EstoqueInsuficienteNoFechamento)
+    async def _estoque_insuficiente_no_fechamento(
+        _: Request, exc: EstoqueInsuficienteNoFechamento
+    ) -> JSONResponse:
+        # Conflito com o estado do estoque: a comanda continua aberta e nada foi baixado.
         return _resp(
-            422,
+            409,
             "estoque_insuficiente",
-            f"Estoque insuficiente: disponível {exc.disponivel}, solicitado {exc.solicitado}",
+            _texto_estoque_insuficiente(exc),
+            extra={
+                "insumo_id": exc.insumo_id,
+                "insumo_nome": exc.insumo_nome,
+                "disponivel": str(exc.disponivel),
+                "solicitado": str(exc.solicitado),
+            },
         )
 
     @app.exception_handler(FichaTecnicaInvalida)
@@ -127,3 +177,7 @@ def register_error_handlers(app: FastAPI) -> None:
             "ficha_tecnica_invalida",
             _MOTIVOS_FICHA.get(exc.motivo, "Ficha técnica inválida"),
         )
+
+    @app.exception_handler(ItemComandaInvalido)
+    async def _item_invalido(_: Request, exc: ItemComandaInvalido) -> JSONResponse:
+        return _resp(422, exc.motivo, _MOTIVOS_ITEM.get(exc.motivo, "Item inválido"))

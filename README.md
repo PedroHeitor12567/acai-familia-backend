@@ -135,16 +135,62 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
   Na ficha, o mesmo insumo não repete na receita e insumo/produto/adicional precisam estar ativos
   e o produto precisa ter preço no tamanho.
 
-  **Para a Fase 2 (comandas):** `uow.estoque.aplicar_saida(insumo_id, quantidade, usuario_id, motivo)`
-  aplica a baixa na transação em andamento (quem chama decide o `commit`),
-  `uow.ficha_tecnica.obter_ficha_produto/obter_ficha_adicional` leem as receitas e
+  Pontos de reuso (usados pelo fechamento de comanda): `uow.estoque.aplicar_saida(insumo_id,
+  quantidade, usuario_id, motivo)` aplica a baixa na transação em andamento (quem chama decide o
+  `commit`), `uow.ficha_tecnica.obter_ficha_produto/obter_ficha_adicional` leem as receitas e
   `domain.estoque.regras.calcular_consumo(ficha, quantidade_vendida)` devolve `{insumo_id: quantidade}`.
 
-Erros novos (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encontrado`,
-`tamanho_nao_encontrado`, `adicional_nao_encontrado`, `insumo_nao_encontrado` (404);
-`nome_ja_cadastrado` (409); `estoque_insuficiente`, `ficha_tecnica_invalida`, `valor_invalido` (422).
-Toda escrita é auditada (`criar`, `atualizar`, `ativar`/`desativar`, `definir_preco`, `movimentar`,
-`definir_ficha`).
+- Comandas (`domain/comandas`): abrir, lançar itens, fechar com baixa de estoque, cancelar e consultar.
+  Abrir, lançar/alterar/remover itens e consultar: **admin, gerente, atendente e caixa**.
+  Fechar e cancelar: **admin, gerente e caixa** (o atendente lança, mas não fecha).
+
+  | Rota | |
+  |---|---|
+  | `POST /comandas` | abre (`cliente_nome` obrigatório; `origem` `balcao`/`whatsapp`, `cliente_contato`, `observacao`) |
+  | `GET /comandas` | lista paginada (`limit` 1–100, `offset`) com filtros `status`, `origem`, `cliente` (parcial, sem diferenciar maiúsculas), `aberta_por_id`, `de`/`ate` (por `aberta_em`, inclusivos). Abertas: as mais antigas primeiro; demais: da mais recente para a mais antiga |
+  | `GET /comandas/{id}` | detalhe com itens, adicionais, subtotais e total |
+  | `POST /comandas/{id}/itens` | lança `produto_id`, `tamanho_id`, `quantidade` (1–99), `adicionais: [{adicional_id, quantidade}]`, `observacao`; devolve a comanda |
+  | `PATCH /comandas/{id}/itens/{item_id}` | altera `quantidade` e/ou `observacao` (`""` limpa) |
+  | `DELETE /comandas/{id}/itens/{item_id}` | remove o item (204) |
+  | `POST /comandas/{id}/fechar` | fecha baixando o estoque; resposta traz `consumo` e `itens_sem_ficha` |
+  | `POST /comandas/{id}/cancelar` | `aberta → cancelada` (`motivo` opcional vai para a auditoria); não mexe no estoque |
+
+  **Preço congelado:** o preço (`produto_tamanhos.preco`, `adicionais.preco`) e os nomes do produto,
+  tamanho e adicionais são copiados para o item no lançamento. Reajustar ou renomear o cardápio
+  depois não altera comandas existentes. O mesmo produto/tamanho vira linhas separadas (sem mesclar),
+  pois podem ter adicionais e observações diferentes. Subtotal do item =
+  `(preço + Σ preço do adicional × qtd) × quantidade`.
+
+  **Fechamento** (`FecharComanda`), tudo na mesma `UnitOfWork` e com um único `commit()`:
+  1. trava a comanda (`SELECT ... FOR UPDATE`) e confere `aberta` já com o lock (dois fechamentos
+     simultâneos se serializam: o segundo recebe 409);
+  2. recusa comanda sem itens (409 `comanda_vazia`);
+  3. soma o consumo da ficha técnica da comanda inteira num único dict (insumo → quantidade; o mesmo
+     insumo vindo de itens/adicionais diferentes é somado);
+  4. baixa uma vez por insumo, em **ordem crescente de `insumo_id`** (evita deadlock), com
+     `motivo = "comanda:<id>"`;
+  5. falta de **qualquer** insumo desfaz tudo (rollback): nada é baixado e a comanda segue `aberta`;
+     a resposta é 409 `estoque_insuficiente` com `insumo_id`, `insumo_nome`, `disponivel` e `solicitado`;
+  6. grava `status = fechada`, `fechada_em`, `fechada_por_id` e o `total` (snapshot) e audita total,
+     quantidade de itens e consumo por insumo.
+
+  Ordem de locks: comanda → insumos (ids crescentes). Lançar, alterar e remover itens também travam a
+  comanda antes, então nada muda os itens durante um fechamento. `fechada` e `cancelada` são estados
+  terminais (sem estorno nem reabertura nesta fase). **Produto sem ficha técnica** fecha sem baixar
+  estoque e é listado em `itens_sem_ficha` (resposta e auditoria). O pagamento (Fase 3) deve ser
+  plugado em `FecharComanda`, antes do `commit()`.
+
+  A falta de insumo no fechamento responde **409**; já a movimentação manual de estoque continua **422**.
+
+Erros (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encontrado`,
+`tamanho_nao_encontrado`, `adicional_nao_encontrado`, `insumo_nao_encontrado`,
+`comanda_nao_encontrada`, `item_comanda_nao_encontrado` (404); `nome_ja_cadastrado`,
+`comanda_nao_aberta`, `comanda_vazia`, `estoque_insuficiente` no fechamento (409);
+`estoque_insuficiente` na movimentação manual, `ficha_tecnica_invalida`, `valor_invalido` e, nos itens
+da comanda, `produto_inativo`, `tamanho_inativo`, `adicional_inativo`, `produto_sem_preco`,
+`adicional_repetido` (422). Toda escrita é auditada (`criar`, `atualizar`, `ativar`/`desativar`,
+`definir_preco`, `movimentar`, `definir_ficha`, `abrir`, `adicionar_item`, `atualizar_item`,
+`remover_item`, `fechar`, `cancelar`).
 
 ### Limitação conhecida: senha e refresh token
 
@@ -153,9 +199,9 @@ invalida os tokens já emitidos**: o access vale até 15 min e o refresh até 7 
 usuário corta o acesso na hora**, porque `ativo` é checado a cada requisição (e no refresh).
 
 ## Próximos passos
-1. Comandas (consomem cardápio, preços e baixa de estoque; transação única no fechamento)
-2. Caixa e financeiro (`Numeric(12,2)`, nunca float)
-3. Dashboard (consultas de leitura)
-4. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,
+1. Caixa, pagamentos e financeiro (`Numeric(12,2)`, nunca float), ligados ao fechamento da comanda
+2. Dashboard (consultas de leitura)
+3. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,
    idempotência pelo ID da mensagem, LLM só devolve JSON validado contra cardápio/preços reais
-5. Revogação de refresh token (jti em banco/Redis)
+4. Revogação de refresh token (jti em banco/Redis)
+5. Estorno, reabertura e cancelamento de comanda fechada (exigem devolver estoque e pagamento)

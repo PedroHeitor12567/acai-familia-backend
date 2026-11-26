@@ -13,7 +13,7 @@ from app.domain.estoque.entities import (
     UnidadeMedida,
 )
 from app.domain.estoque.regras import calcular_movimentacao
-from app.domain.exceptions import InsumoNaoEncontrado
+from app.domain.exceptions import EstoqueInsuficiente, InsumoNaoEncontrado
 from app.infrastructure.persistence.estoque.models import (
     InsumoModel,
     ItemFichaAdicionalModel,
@@ -126,7 +126,11 @@ class SqlAlchemyEstoqueRepository:
         )
         if insumo is None:
             raise InsumoNaoEncontrado
-        resultado = calcular_movimentacao(tipo, insumo.estoque_atual, quantidade)
+        try:
+            resultado = calcular_movimentacao(tipo, insumo.estoque_atual, quantidade)
+        except EstoqueInsuficiente as e:
+            e.insumo_id, e.insumo_nome = insumo.id, insumo.nome  # diz qual insumo faltou
+            raise
         saldo_antes = insumo.estoque_atual
         insumo.estoque_atual = resultado.saldo_apos
         mov = MovimentacaoEstoqueModel(

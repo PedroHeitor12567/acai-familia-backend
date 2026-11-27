@@ -4,6 +4,7 @@ Routers e casos de uso nunca importam `infrastructure`; recebem o que este módu
 """
 
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import Annotated, TypeVar
 
@@ -22,6 +23,7 @@ from app.application.usuarios.use_cases.obter_usuario import ObterUsuario
 from app.application.usuarios.use_cases.redefinir_senha import RedefinirSenha
 from app.application.usuarios.use_cases.renovar_token import RenovarToken
 from app.config import Settings, get_settings
+from app.domain.financeiro.regras import data_local
 from app.infrastructure.persistence.session import get_session, get_session_factory
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from app.infrastructure.security.hashing import Argon2Hasher
@@ -83,6 +85,10 @@ def get_token_service(settings: SettingsDep) -> TokenService:
 
 def get_throttle() -> LoginThrottle:
     return get_login_throttle()
+
+
+def get_hoje(settings: SettingsDep) -> date:
+    return data_local(datetime.now(UTC), settings.timezone)
 
 
 UowDep = Annotated[UnitOfWork, Depends(get_uow)]

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.comandas.use_cases.abrir import AbrirComanda
-from app.application.comandas.use_cases.fechamento import CancelarComanda, FecharComanda
+from app.application.comandas.use_cases.fechamento import CancelarComanda
 from app.application.comandas.use_cases.itens import AdicionalPedido, AdicionarItem
 from app.application.estoque.ports import FiltrosMovimentacao
 from app.bootstrap.container import build_uow
@@ -25,7 +25,7 @@ from app.domain.exceptions import (
 )
 from app.domain.usuarios.entities import Papel
 from app.infrastructure.persistence.auditoria.models import AuditLogModel
-from tests.comandas_helpers import semear_cardapio, semear_usuario
+from tests.comandas_helpers import abrir_caixa, fechar_com_pix, semear_cardapio, semear_usuario
 
 D = Decimal
 
@@ -59,13 +59,14 @@ async def test_fechar_baixa_exatamente_o_consumo_da_ficha(s: AsyncSession) -> No
     sem = await semear_cardapio(s)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     await AdicionarItem(uow).executar(
         caixa, cid, sem.produto_id, sem.tamanho_id, 2, [AdicionalPedido(sem.adicional_id, 2)]
     )
     await AdicionarItem(uow).executar(caixa, cid, sem.produto_id, sem.tamanho_id, 1)
 
-    r = await FecharComanda(uow).executar(caixa, cid)
+    r = await fechar_com_pix(uow, caixa, cid)
 
     # polpa: 0,3*2 + 0,3*1 = 0,9 | granola: 0,02 * (2*2) = 0,08
     assert r.consumo == {sem.polpa_id: D("0.9"), sem.granola_id: D("0.08")}
@@ -89,9 +90,10 @@ async def test_total_e_consumo_ficam_na_auditoria_e_o_total_nao_muda_com_o_carda
     sem = await semear_cardapio(s)
     gerente = await semear_usuario(s, Papel.GERENTE)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(gerente, "Ana")).id_persistido
     await AdicionarItem(uow).executar(gerente, cid, sem.produto_id, sem.tamanho_id)
-    await FecharComanda(uow).executar(gerente, cid)
+    await fechar_com_pix(uow, gerente, cid)
 
     await uow.cardapio.definir_preco(ProdutoTamanho(sem.produto_id, sem.tamanho_id, D("50.00")))
     await s.commit()
@@ -103,6 +105,9 @@ async def test_total_e_consumo_ficam_na_auditoria_e_o_total_nao_muda_com_o_carda
     assert log.detalhes == {
         "total": "18.90",
         "itens": 1,
+        "sessao_id": 1,
+        "pagamentos": [{"forma": "pix", "valor": "18.90", "valor_recebido": None}],
+        "troco": "0.00",
         "consumo": {str(sem.polpa_id): "0.300"},
         "itens_sem_ficha": [],
     }
@@ -112,6 +117,7 @@ async def test_falta_de_estoque_faz_rollback_total_e_diz_qual_insumo(s: AsyncSes
     sem = await semear_cardapio(s)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     # três insumos na ficha; o de MAIOR id (o último a ser baixado) não tem saldo suficiente
     cobertura = await uow.estoque.adicionar_insumo(Insumo("Cobertura", UnidadeMedida.KG))
     await uow.estoque.movimentar(
@@ -132,7 +138,7 @@ async def test_falta_de_estoque_faz_rollback_total_e_diz_qual_insumo(s: AsyncSes
     )  # cobertura precisa de 0,150 e só há 0,100
 
     with pytest.raises(EstoqueInsuficienteNoFechamento) as erro:
-        await FecharComanda(uow).executar(caixa, cid)
+        await fechar_com_pix(uow, caixa, cid)
 
     assert erro.value.insumo_id == cobertura.id_persistido
     assert erro.value.insumo_nome == "Cobertura"
@@ -153,33 +159,36 @@ async def test_fechar_duas_vezes_baixa_uma_vez_so(s: AsyncSession) -> None:
     sem = await semear_cardapio(s)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     await AdicionarItem(uow).executar(caixa, cid, sem.produto_id, sem.tamanho_id)
-    await FecharComanda(uow).executar(caixa, cid)
+    await fechar_com_pix(uow, caixa, cid)
     with pytest.raises(OperacaoNaoPermitida, match="comanda_nao_aberta"):
-        await FecharComanda(uow).executar(caixa, cid)
+        await fechar_com_pix(uow, caixa, cid)
     assert await _saldo(s, sem.polpa_id) == D("9.7")
 
 
 async def test_nao_fecha_comanda_vazia_nem_inexistente(s: AsyncSession) -> None:
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     with pytest.raises(OperacaoNaoPermitida, match="comanda_vazia"):
-        await FecharComanda(uow).executar(caixa, cid)
+        await fechar_com_pix(uow, caixa, cid)
     with pytest.raises(ComandaNaoEncontrada):
-        await FecharComanda(uow).executar(caixa, 999)
+        await fechar_com_pix(uow, caixa, 999)
 
 
 async def test_produto_sem_ficha_fecha_sem_baixar_e_avisa(s: AsyncSession) -> None:
     sem = await semear_cardapio(s, com_ficha=False)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     com_item = await AdicionarItem(uow).executar(caixa, cid, sem.produto_id, sem.tamanho_id)
     item_id = com_item.itens[0].id_persistido
 
-    r = await FecharComanda(uow).executar(caixa, cid)
+    r = await fechar_com_pix(uow, caixa, cid)
 
     assert r.itens_sem_ficha == [item_id] and r.consumo == {}
     assert r.comanda.status is StatusComanda.FECHADA
@@ -192,6 +201,7 @@ async def test_cancelar_nao_mexe_no_estoque_e_e_terminal(s: AsyncSession) -> Non
     sem = await semear_cardapio(s)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     await AdicionarItem(uow).executar(caixa, cid, sem.produto_id, sem.tamanho_id)
 
@@ -205,7 +215,7 @@ async def test_cancelar_nao_mexe_no_estoque_e_e_terminal(s: AsyncSession) -> Non
     with pytest.raises(OperacaoNaoPermitida, match="comanda_nao_aberta"):
         await CancelarComanda(uow).executar(caixa, cid)
     with pytest.raises(OperacaoNaoPermitida, match="comanda_nao_aberta"):
-        await FecharComanda(uow).executar(caixa, cid)
+        await fechar_com_pix(uow, caixa, cid)
 
 
 async def test_motivo_longo_demais_e_recusado(s: AsyncSession) -> None:
@@ -220,9 +230,10 @@ async def test_cancelar_comanda_fechada_e_recusado(s: AsyncSession) -> None:
     sem = await semear_cardapio(s)
     caixa = await semear_usuario(s, Papel.CAIXA)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(caixa, "Ana")).id_persistido
     await AdicionarItem(uow).executar(caixa, cid, sem.produto_id, sem.tamanho_id)
-    await FecharComanda(uow).executar(caixa, cid)
+    await fechar_com_pix(uow, caixa, cid)
     with pytest.raises(OperacaoNaoPermitida, match="comanda_nao_aberta"):
         await CancelarComanda(uow).executar(caixa, cid)
     assert await _saldo(s, sem.polpa_id) == D("9.7")  # nada foi devolvido
@@ -232,10 +243,11 @@ async def test_atendente_lanca_mas_nao_fecha_nem_cancela(s: AsyncSession) -> Non
     sem = await semear_cardapio(s)
     atendente = await semear_usuario(s, Papel.ATENDENTE)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(atendente, "Ana")).id_persistido
     await AdicionarItem(uow).executar(atendente, cid, sem.produto_id, sem.tamanho_id)
     with pytest.raises(PermissaoNegada):
-        await FecharComanda(uow).executar(atendente, cid)
+        await fechar_com_pix(uow, atendente, cid)
     with pytest.raises(PermissaoNegada):
         await CancelarComanda(uow).executar(atendente, cid)
     relida = await uow.comandas.obter(cid)
@@ -247,7 +259,8 @@ async def test_admin_gerente_e_caixa_fecham(s: AsyncSession, papel: Papel) -> No
     sem = await semear_cardapio(s)
     ator = await semear_usuario(s, papel)
     uow = build_uow(s)
+    await abrir_caixa(s)
     cid = (await AbrirComanda(uow).executar(ator, "Ana")).id_persistido
     await AdicionarItem(uow).executar(ator, cid, sem.produto_id, sem.tamanho_id)
-    resultado = await FecharComanda(uow).executar(ator, cid)
+    resultado = await fechar_com_pix(uow, ator, cid)
     assert resultado.comanda.status is StatusComanda.FECHADA

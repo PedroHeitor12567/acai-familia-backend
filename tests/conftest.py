@@ -114,6 +114,18 @@ async def pg_session() -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
+async def pg_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL não definida")
+    engine = create_async_engine(url, pool_size=20)
+    try:
+        yield async_sessionmaker(bind=engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
 async def pg_client(pg_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """API completa sobre o PostgreSQL migrado pelo Alembic (sem `create_all`).
 

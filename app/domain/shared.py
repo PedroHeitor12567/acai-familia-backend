@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from app.domain.exceptions import ValorInvalido
+
 
 class ComId:
     """Mixin das entidades persistidas: `id` é None até o primeiro save."""
@@ -20,3 +22,13 @@ def decimal_valido(valor: Decimal, casas: int) -> bool:
         return False
     expoente = valor.as_tuple().exponent
     return isinstance(expoente, int) and expoente >= -casas
+
+
+def validar_valor_monetario(
+    valor: Decimal, *, permite_zero: bool = False, motivo: str = "valor_invalido"
+) -> Decimal:
+    if not isinstance(valor, Decimal) or not decimal_valido(valor, 2):
+        raise ValorInvalido(motivo)
+    if valor < 0 or (valor == 0 and not permite_zero):
+        raise ValorInvalido(motivo)
+    return valor

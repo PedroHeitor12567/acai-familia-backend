@@ -19,10 +19,12 @@ from app.interfaces.http.deps import (
 )
 from app.interfaces.http.schemas.comandas import (
     CancelarIn,
+    ComandaDetalheOut,
     ComandaIn,
     ComandaOut,
     ComandaResumoOut,
     FechamentoOut,
+    FecharComandaIn,
     ItemIn,
     ItemUpdateIn,
     PaginaComandasOut,
@@ -68,11 +70,11 @@ async def listar_comandas(
     )
 
 
-@router.get("/{comanda_id}", response_model=ComandaOut)
+@router.get("/{comanda_id}", response_model=ComandaDetalheOut)
 async def obter_comanda(
     comanda_id: int, ator: OperadorComandaDep, caso: ObterComandaDep
-) -> ComandaOut:
-    return ComandaOut.de_entidade(await caso.executar(ator, comanda_id))
+) -> ComandaDetalheOut:
+    return ComandaDetalheOut.de_detalhe(await caso.executar(ator, comanda_id))
 
 
 @router.post("/{comanda_id}/itens", response_model=ComandaOut, status_code=status.HTTP_201_CREATED)
@@ -114,11 +116,13 @@ async def remover_item(
 
 @router.post("/{comanda_id}/fechar", response_model=FechamentoOut)
 async def fechar_comanda(
-    comanda_id: int, ator: FechamentoComandaDep, caso: FecharComandaDep
+    comanda_id: int,
+    ator: FechamentoComandaDep,
+    caso: FecharComandaDep,
+    body: FecharComandaIn | None = None,
 ) -> FechamentoOut:
-    """Baixa o estoque pela ficha técnica e fecha, tudo na mesma transação. Falta de qualquer
-    insumo (409) não baixa nada e a comanda continua aberta."""
-    return FechamentoOut.de_resultado(await caso.executar(ator, comanda_id))
+    pagamentos = [p.para_pedido() for p in body.pagamentos] if body else []
+    return FechamentoOut.de_resultado(await caso.executar(ator, comanda_id, pagamentos))
 
 
 @router.post("/{comanda_id}/cancelar", response_model=ComandaOut)

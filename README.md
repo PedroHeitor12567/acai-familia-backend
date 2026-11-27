@@ -148,11 +148,11 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
   |---|---|
   | `POST /comandas` | abre (`cliente_nome` obrigatório; `origem` `balcao`/`whatsapp`, `cliente_contato`, `observacao`) |
   | `GET /comandas` | lista paginada (`limit` 1–100, `offset`) com filtros `status`, `origem`, `cliente` (parcial, sem diferenciar maiúsculas), `aberta_por_id`, `de`/`ate` (por `aberta_em`, inclusivos). Abertas: as mais antigas primeiro; demais: da mais recente para a mais antiga |
-  | `GET /comandas/{id}` | detalhe com itens, adicionais, subtotais e total |
+  | `GET /comandas/{id}` | detalhe com itens, adicionais, subtotais e total; fechada: inclui `pagamentos` e `troco` |
   | `POST /comandas/{id}/itens` | lança `produto_id`, `tamanho_id`, `quantidade` (1–99), `adicionais: [{adicional_id, quantidade}]`, `observacao`; devolve a comanda |
   | `PATCH /comandas/{id}/itens/{item_id}` | altera `quantidade` e/ou `observacao` (`""` limpa) |
   | `DELETE /comandas/{id}/itens/{item_id}` | remove o item (204) |
-  | `POST /comandas/{id}/fechar` | fecha baixando o estoque; resposta traz `consumo` e `itens_sem_ficha` |
+  | `POST /comandas/{id}/fechar` | **exige** `{"pagamentos": [...]}` (ver Caixa e pagamentos); fecha baixando o estoque; resposta traz `pagamentos`, `troco`, `sessao_caixa_id`, `consumo` e `itens_sem_ficha` |
   | `POST /comandas/{id}/cancelar` | `aberta → cancelada` (`motivo` opcional vai para a auditoria); não mexe no estoque |
 
   **Preço congelado:** o preço (`produto_tamanhos.preco`, `adicionais.preco`) e os nomes do produto,
@@ -163,24 +163,74 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
 
   **Fechamento** (`FecharComanda`), tudo na mesma `UnitOfWork` e com um único `commit()`:
   1. trava a comanda (`SELECT ... FOR UPDATE`) e confere `aberta` já com o lock (dois fechamentos
-     simultâneos se serializam: o segundo recebe 409);
-  2. recusa comanda sem itens (409 `comanda_vazia`);
-  3. soma o consumo da ficha técnica da comanda inteira num único dict (insumo → quantidade; o mesmo
-     insumo vindo de itens/adicionais diferentes é somado);
-  4. baixa uma vez por insumo, em **ordem crescente de `insumo_id`** (evita deadlock), com
-     `motivo = "comanda:<id>"`;
-  5. falta de **qualquer** insumo desfaz tudo (rollback): nada é baixado e a comanda segue `aberta`;
-     a resposta é 409 `estoque_insuficiente` com `insumo_id`, `insumo_nome`, `disponivel` e `solicitado`;
-  6. grava `status = fechada`, `fechada_em`, `fechada_por_id` e o `total` (snapshot) e audita total,
-     quantidade de itens e consumo por insumo.
+     simultâneos se serializam: o segundo recebe 409); recusa comanda sem itens (409 `comanda_vazia`);
+  2. calcula o `total` e valida os pagamentos (validação pura, antes de qualquer outro lock);
+  3. se `total > 0`, trava a sessão de caixa aberta (sem ela, 409 `caixa_fechado`);
+  4. soma o consumo da ficha técnica da comanda inteira (o mesmo insumo vindo de itens/adicionais
+     diferentes é somado) e baixa uma vez por insumo, em **ordem crescente de `insumo_id`**, com
+     `motivo = "comanda:<id>"`; falta de **qualquer** insumo desfaz tudo e responde 409
+     `estoque_insuficiente` com `insumo_id`, `insumo_nome`, `disponivel` e `solicitado`;
+  5. grava os pagamentos vinculados à sessão;
+  6. grava `status = fechada`, `fechada_em`, `fechada_por_id` e o `total` (snapshot);
+  7. audita total, sessão, formas e valores, troco e consumo por insumo.
 
-  Ordem de locks: comanda → insumos (ids crescentes). Lançar, alterar e remover itens também travam a
-  comanda antes, então nada muda os itens durante um fechamento. `fechada` e `cancelada` são estados
-  terminais (sem estorno nem reabertura nesta fase). **Produto sem ficha técnica** fecha sem baixar
-  estoque e é listado em `itens_sem_ficha` (resposta e auditoria). O pagamento (Fase 3) deve ser
-  plugado em `FecharComanda`, antes do `commit()`.
+  **Ordem global de locks: comanda → sessão de caixa → insumos (ids crescentes).** Lançar, alterar e
+  remover itens também travam a comanda antes, então nada muda os itens durante um fechamento.
+  `fechada` e `cancelada` são estados terminais (sem estorno nem reabertura). **Produto sem ficha
+  técnica** fecha sem baixar estoque e é listado em `itens_sem_ficha` (resposta e auditoria).
 
   A falta de insumo no fechamento responde **409**; já a movimentação manual de estoque continua **422**.
+
+- Caixa e pagamentos (`domain/caixa`): **admin, gerente e caixa** (o atendente não acessa o caixa).
+  Só existe **uma sessão de caixa aberta por vez**, garantido por índice único parcial no banco
+  (vale mesmo com duas aberturas simultâneas).
+
+  | Rota | |
+  |---|---|
+  | `POST /caixa/sessoes` | abre com `valor_abertura` (fundo de troco, >= 0) e `observacao?`; já existe uma aberta: 409 `caixa_ja_aberto` |
+  | `GET /caixa/sessoes/atual` | sessão aberta com `saldo_dinheiro`, `resumo_por_forma` e movimentos; 404 `nenhuma_sessao_aberta` |
+  | `GET /caixa/sessoes` · `GET /caixa/sessoes/{id}` | listagem paginada (`status`, `de`/`ate` por `aberta_em`) e detalhe |
+  | `POST /caixa/sessoes/{id}/movimentos` | `tipo` `sangria` (retirada) ou `suprimento` (reforço), `valor` > 0 e `motivo` obrigatório |
+  | `POST /caixa/sessoes/{id}/fechar` | `valor_contado` e `observacao?`; congela `valor_esperado`, `valor_contado` e `diferenca` |
+
+  **Pagamento no fechamento da comanda (contrato novo, incompatível com a Fase 2):**
+  `POST /comandas/{id}/fechar` passa a exigir o body
+
+  ```json
+  { "pagamentos": [
+      { "forma": "dinheiro", "valor": "20.00", "valor_recebido": "50.00" },
+      { "forma": "pix", "valor": "20.00" } ] }
+  ```
+
+  Formas: `dinheiro`, `pix`, `cartao_debito`, `cartao_credito`. A soma dos `valor` deve ser **exatamente**
+  o total da comanda (422 `pagamento_diferente_do_total`), sem forma repetida (`forma_repetida`);
+  `valor_recebido` só existe em dinheiro e é `>= valor` (`valor_recebido_invalido`,
+  `valor_recebido_insuficiente`); o excedente é o troco. Sem body (ou lista vazia) só fecha comanda de
+  total zero, que não exige caixa aberto nem grava pagamento. Sem sessão aberta: 409 `caixa_fechado`
+  e a comanda segue aberta. Pagamento, baixa de estoque e status da comanda são uma transação só.
+
+  **Gaveta:** `valor_esperado = abertura + Σ dinheiro (valor aplicado, sem o troco) + suprimentos −
+  sangrias`; pix e cartão não entram. Sangria que deixaria o saldo negativo: 409
+  `saldo_caixa_insuficiente` (as sangrias travam a sessão, então duas simultâneas se enfileiram).
+  Fechar o caixa com `diferenca != 0` exige `observacao` (422 `justificativa_obrigatoria`); comandas
+  ainda abertas não impedem o fechamento e serão pagas na próxima sessão. Nunca existe pagamento numa
+  sessão fechada: `FecharCaixa` e o fechamento de comanda disputam o lock da sessão, e quem perde vê o
+  resultado do outro (o pagamento entra no esperado, ou a comanda recebe 409 `caixa_fechado`).
+
+- Financeiro (`domain/financeiro`): **admin e gerente**. Contas a pagar/receber e despesas; a receita
+  de vendas vem dos `pagamentos`, não de lançamentos (a Fase 4 soma as duas fontes).
+
+  | Rota | |
+  |---|---|
+  | `GET/POST /financeiro/categorias` · `PATCH /financeiro/categorias/{id}` | `tipo` `receita`/`despesa`; nome único por tipo (sem diferenciar maiúsculas); renomeia, ativa e desativa |
+  | `POST /financeiro/lancamentos` | `tipo` `pagar` (categoria de despesa) ou `receber` (receita), `descricao`, `valor` > 0, `vencimento`, `categoria_id`, `contraparte?`, `observacao?`; com `baixa: {data_pagamento, forma}` já nasce pago |
+  | `GET /financeiro/lancamentos` | paginada; filtros `tipo`, `status`, `categoria_id`, `atrasados`, `vencimento_de`/`vencimento_ate` (inclusivos), `contraparte` (parcial). Pendentes por vencimento crescente; os demais, do mais recente |
+  | `GET/PATCH /financeiro/lancamentos/{id}` | detalhe; edição só de `pendente` |
+  | `POST /financeiro/lancamentos/{id}/baixar` · `/cancelar` | `pendente → pago` (`data_pagamento`, `forma`) ou `pendente → cancelado` (`motivo?`); ambos terminais |
+
+  **Atrasado não é status gravado:** a resposta traz `atrasado` (derivado de `pendente` e
+  `vencimento < hoje`). "Hoje" é a data no fuso da loja, configurado em `TIMEZONE` (padrão
+  `America/Sao_Paulo`).
 
 Erros (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encontrado`,
 `tamanho_nao_encontrado`, `adicional_nao_encontrado`, `insumo_nao_encontrado`,
@@ -188,9 +238,15 @@ Erros (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encon
 `comanda_nao_aberta`, `comanda_vazia`, `estoque_insuficiente` no fechamento (409);
 `estoque_insuficiente` na movimentação manual, `ficha_tecnica_invalida`, `valor_invalido` e, nos itens
 da comanda, `produto_inativo`, `tamanho_inativo`, `adicional_inativo`, `produto_sem_preco`,
-`adicional_repetido` (422). Toda escrita é auditada (`criar`, `atualizar`, `ativar`/`desativar`,
-`definir_preco`, `movimentar`, `definir_ficha`, `abrir`, `adicionar_item`, `atualizar_item`,
-`remover_item`, `fechar`, `cancelar`).
+`adicional_repetido` (422). Caixa e financeiro: 404 `sessao_caixa_nao_encontrada`,
+`nenhuma_sessao_aberta`, `categoria_financeira_nao_encontrada`, `lancamento_nao_encontrado`; 409
+`caixa_ja_aberto`, `caixa_fechado`, `sessao_nao_aberta`, `saldo_caixa_insuficiente`,
+`lancamento_nao_pendente`, `categoria_financeira_inativa`; 422 `pagamento_diferente_do_total`,
+`forma_repetida`, `valor_recebido_invalido`, `valor_recebido_insuficiente`,
+`justificativa_obrigatoria`, `categoria_incompativel`, `valor_invalido`. Toda escrita é auditada
+(`criar`, `atualizar`, `ativar`/`desativar`, `definir_preco`, `movimentar`, `definir_ficha`, `abrir`,
+`adicionar_item`, `atualizar_item`, `remover_item`, `fechar`, `cancelar`, `sangria`, `suprimento`,
+`baixar`).
 
 ### Limitação conhecida: senha e refresh token
 
@@ -199,8 +255,8 @@ invalida os tokens já emitidos**: o access vale até 15 min e o refresh até 7 
 usuário corta o acesso na hora**, porque `ativo` é checado a cada requisição (e no refresh).
 
 ## Próximos passos
-1. Caixa, pagamentos e financeiro (`Numeric(12,2)`, nunca float), ligados ao fechamento da comanda
-2. Dashboard (consultas de leitura)
+1. Dashboard (consultas de leitura: faturamento por forma de pagamento, fluxo de caixa, contas a pagar/receber)
+2. Múltiplos caixas/terminais simultâneos
 3. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,
    idempotência pelo ID da mensagem, LLM só devolve JSON validado contra cardápio/preços reais
 4. Revogação de refresh token (jti em banco/Redis)

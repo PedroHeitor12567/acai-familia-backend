@@ -218,7 +218,7 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
   resultado do outro (o pagamento entra no esperado, ou a comanda recebe 409 `caixa_fechado`).
 
 - Financeiro (`domain/financeiro`): **admin e gerente**. Contas a pagar/receber e despesas; a receita
-  de vendas vem dos `pagamentos`, não de lançamentos (a Fase 4 soma as duas fontes).
+  de vendas vem dos `pagamentos`, não de lançamentos (o fluxo de caixa do dashboard soma as duas fontes).
 
   | Rota | |
   |---|---|
@@ -232,6 +232,69 @@ completa sobre o PostgreSQL. Cada fase nova deve trazer ao menos um fluxo e2e no
   `vencimento < hoje`). "Hoje" é a data no fuso da loja, configurado em `TIMEZONE` (padrão
   `America/Sao_Paulo`).
 
+- Dashboard (`domain/dashboard`, `application/dashboard`): **100% leitura, só admin e gerente**
+  (caixa e atendente recebem 403; sem token, 401). Nenhum endpoint grava dado, trava linha ou
+  audita. Padrão *query service*: o caso de uso valida permissão e período e chama a porta
+  `DashboardQueries`; o SQL só filtra, agrupa e soma (`GROUP BY`), e as contas (ticket médio,
+  variação, série preenchida, acumulado, cobertura) são funções puras em `domain/dashboard`.
+
+  | Rota (`GET`) | Parâmetros | Resposta |
+  |---|---|---|
+  | `/dashboard/visao-geral` | – | vendas de hoje vs. mesmo dia da semana anterior, comandas abertas, caixa (saldo em dinheiro em tempo real), contadores de estoque e contas atrasadas |
+  | `/dashboard/vendas/resumo` | `de`, `ate` | faturamento, qtd de comandas, ticket médio, itens vendidos, canceladas (informativo) + período anterior e `variacao_pct` |
+  | `/dashboard/vendas/serie` | `de`, `ate`, `agrupamento` (`dia`\|`semana`\|`mes`) | uma posição por bucket, com zeros onde não houve venda |
+  | `/dashboard/vendas/mais-vendidos` | `de`, `ate`, `limite` (1–50), `ordenar_por` (`quantidade`\|`receita`) | ranking por produto com `participacao_pct` |
+  | `/dashboard/vendas/por-forma-pagamento` | `de`, `ate` | as quatro formas sempre presentes (`0.00` se não houve) |
+  | `/dashboard/vendas/por-hora` | `de`, `ate` | 24 posições (hora local) |
+  | `/dashboard/estoque/critico` | `nivel` (`zerado`\|`critico`), `limit`, `offset` | insumos críticos + `total_zerados`/`total_criticos` |
+  | `/dashboard/financeiro/fluxo-caixa` | `de`, `ate`, `agrupamento`, `incluir_projecao` | realizado por bucket, resultado, saídas por categoria e, opcional, projeção |
+  | `/dashboard/financeiro/contas` | – | posição de pagar/receber de hoje e os 10 próximos vencimentos |
+
+  **Período e fuso.** `de`/`ate` são datas **inclusivas** no fuso `TIMEZONE`. Padrão: últimos 30
+  dias até hoje. A consulta usa `[de 00:00 local, ate+1 00:00 local)` convertido para UTC, então uma
+  venda às 23:30 de São Paulo (02:30 UTC do dia seguinte) pertence ao dia local. 422
+  `periodo_invalido` (o campo `motivo` diz qual): `periodo_invertido`, `periodo_no_futuro`,
+  `periodo_longo_demais` (> 366 dias) e `agrupamento_dia_longo_demais` (`dia` só até 92 dias). Só o
+  fluxo com `incluir_projecao=true` aceita `ate` no futuro. Período sem venda é 200 com zeros. O
+  período anterior tem a mesma duração e vem logo antes. Semana começa na **segunda**; mês é o
+  mês-calendário; os buckets das pontas trazem `inicio`/`fim` recortados ao período pedido.
+
+  **O que é venda.** Comanda `fechada`, datada por `fechada_em`, somando o `total` gravado no
+  fechamento; nome e preço dos itens vêm do snapshot da comanda (renomear ou reprecificar o produto
+  não muda o histórico). `aberta` nunca entra; `cancelada` só aparece em `comandas_canceladas`
+  (contada pela data do `cancelar` no `audit_log`, já que a comanda não guarda a data do
+  cancelamento). Receita do item = `quantidade × (preço + Σ adicionais)`. Invariante testada, no
+  mesmo período: `Σ série == resumo.faturamento == Σ por forma == Σ receita dos itens`.
+
+  **Variação e percentuais.** `variacao_pct` tem 1 casa e é `null` quando o anterior é zero. Dinheiro
+  é sempre `Decimal` com 2 casas (string no JSON); percentuais são `Decimal` no cálculo e número no
+  JSON. Cada participação é arredondada sozinha, então a soma pode diferir de 100 em até 0,1 por linha.
+
+  **Fluxo de caixa (regime de caixa).** `entradas_vendas` = `pagamentos` das comandas fechadas (todas
+  as formas, não só a gaveta); `entradas_outras` = lançamentos `receber` pagos e `saidas` = `pagar`
+  pagos, ambos por `data_pagamento`. Sem contagem dupla (venda não gera lançamento). Pendente e
+  cancelado nunca entram no realizado; sangria, suprimento e fundo de troco também não. O
+  `saldo_acumulado` corre desde o início do período (não há saldo anterior). A projeção (pendentes por
+  `vencimento`) vem separada e nunca é somada ao realizado. O resultado é de caixa, **não é lucro**:
+  o sistema ainda não guarda custo de insumo.
+
+  **Estoque crítico.** Insumo ativo, com `estoque_minimo > 0` e `estoque_atual <= estoque_minimo`
+  (exatamente no mínimo conta). Ordem: zerados, menor `cobertura_pct`, nome. Ordenação e paginação
+  são em memória sobre uma única consulta (o conjunto é limitado pelos insumos cadastrados), então os
+  contadores valem para todos os críticos, mesmo com `nivel` ou página fora do alcance.
+
+  **Consistência de leitura.** Uma sessão por requisição, `READ COMMITTED`, sem lock: duas consultas
+  da mesma resposta podem enxergar instantes ligeiramente diferentes, o que é aceitável para um
+  dashboard. Nada de cache. Na visão geral, qualquer falha devolve 500 para a resposta toda (nunca um
+  número faltando ou zerado por engano).
+
+  **Desempenho.** Número fixo de consultas por endpoint, independente do volume: 1 em todos, exceto
+  `contas` (2: posição + próximos vencimentos) e `visao-geral` (5, reaproveitando as mesmas
+  consultas). A migration `0009_dashboard_indices` só cria índices: parcial `comandas (fechada_em)
+  WHERE status = 'fechada'`, `itens_comanda (comanda_id, produto_id)` e `lancamentos (status,
+  data_pagamento)`. Nos testes com PostgreSQL, as consultas de vendas usam o índice parcial (sem
+  `Seq Scan` em `comandas`). Lucro, margem, exportação e cache ficam fora desta fase.
+
 Erros (formato `{code, detail}`): `categoria_nao_encontrada`, `produto_nao_encontrado`,
 `tamanho_nao_encontrado`, `adicional_nao_encontrado`, `insumo_nao_encontrado`,
 `comanda_nao_encontrada`, `item_comanda_nao_encontrado` (404); `nome_ja_cadastrado`,
@@ -243,7 +306,8 @@ da comanda, `produto_inativo`, `tamanho_inativo`, `adicional_inativo`, `produto_
 `caixa_ja_aberto`, `caixa_fechado`, `sessao_nao_aberta`, `saldo_caixa_insuficiente`,
 `lancamento_nao_pendente`, `categoria_financeira_inativa`; 422 `pagamento_diferente_do_total`,
 `forma_repetida`, `valor_recebido_invalido`, `valor_recebido_insuficiente`,
-`justificativa_obrigatoria`, `categoria_incompativel`, `valor_invalido`. Toda escrita é auditada
+`justificativa_obrigatoria`, `categoria_incompativel`, `valor_invalido`; dashboard: 422
+`periodo_invalido` (com `motivo`). Toda escrita é auditada
 (`criar`, `atualizar`, `ativar`/`desativar`, `definir_preco`, `movimentar`, `definir_ficha`, `abrir`,
 `adicionar_item`, `atualizar_item`, `remover_item`, `fechar`, `cancelar`, `sangria`, `suprimento`,
 `baixar`).
@@ -255,9 +319,8 @@ invalida os tokens já emitidos**: o access vale até 15 min e o refresh até 7 
 usuário corta o acesso na hora**, porque `ativo` é checado a cada requisição (e no refresh).
 
 ## Próximos passos
-1. Dashboard (consultas de leitura: faturamento por forma de pagamento, fluxo de caixa, contas a pagar/receber)
-2. Múltiplos caixas/terminais simultâneos
-3. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,
+1. Múltiplos caixas/terminais simultâneos
+2. Bot WhatsApp + Gemini atrás de portas em `application/ports/` — validar assinatura do webhook,
    idempotência pelo ID da mensagem, LLM só devolve JSON validado contra cardápio/preços reais
-4. Revogação de refresh token (jti em banco/Redis)
-5. Estorno, reabertura e cancelamento de comanda fechada (exigem devolver estoque e pagamento)
+3. Revogação de refresh token (jti em banco/Redis)
+4. Estorno, reabertura e cancelamento de comanda fechada (exigem devolver estoque e pagamento)

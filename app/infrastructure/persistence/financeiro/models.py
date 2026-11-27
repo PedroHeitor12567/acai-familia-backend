@@ -70,6 +70,9 @@ class LancamentoModel(Base):
 
 
 Index("ix_lancamentos_status_vencimento", LancamentoModel.status, LancamentoModel.vencimento)
+Index(
+    "ix_lancamentos_status_data_pagamento", LancamentoModel.status, LancamentoModel.data_pagamento
+)
 Index("ix_lancamentos_categoria_id", LancamentoModel.categoria_id)
 Index(
     "ix_lancamentos_pendentes",

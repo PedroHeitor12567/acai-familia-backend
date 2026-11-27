@@ -8,6 +8,7 @@ from app.interfaces.http.routers import (
     caixa,
     cardapio,
     comandas,
+    dashboard,
     estoque,
     financeiro,
     health,
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         comandas.router,
         caixa.router,
         financeiro.router,
+        dashboard.router,
     ):
         app.include_router(router)
     return app

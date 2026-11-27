@@ -58,6 +58,13 @@ Index(
     sqlite_where=text("status = 'aberta'"),
 )
 Index("ix_comandas_cliente_nome_lower", func.lower(ComandaModel.cliente_nome))
+# Dashboard: vendas, série, por hora e por forma filtram `status = 'fechada'` por `fechada_em`.
+Index(
+    "ix_comandas_fechadas_em",
+    ComandaModel.fechada_em,
+    postgresql_where=text("status = 'fechada'"),
+    sqlite_where=text("status = 'fechada'"),
+)
 
 
 class ItemComandaModel(Base):
@@ -88,6 +95,10 @@ class ItemComandaModel(Base):
         order_by="ItemComandaAdicionalModel.id",
         cascade="all, delete-orphan",
     )
+
+
+# Ranking de mais vendidos e itens vendidos agrupam os itens da comanda por produto.
+Index("ix_itens_comanda_comanda_produto", ItemComandaModel.comanda_id, ItemComandaModel.produto_id)
 
 
 class ItemComandaAdicionalModel(Base):

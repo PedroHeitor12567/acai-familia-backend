@@ -12,6 +12,7 @@ from app.domain.exceptions import (
     NaoEncontrado,
     NomeJaCadastrado,
     OperacaoNaoPermitida,
+    PeriodoInvalido,
     PermissaoNegada,
     RegraInvalida,
     SenhaAtualIncorreta,
@@ -86,6 +87,14 @@ _MOTIVOS_ITEM = {
     "adicional_inativo": "O adicional está inativo",
     "produto_sem_preco": "O produto não tem preço definido para este tamanho",
     "adicional_repetido": "O mesmo adicional aparece mais de uma vez no item",
+}
+
+_MOTIVOS_PERIODO = {
+    "periodo_invertido": "A data inicial (de) não pode ser depois da final (ate)",
+    "periodo_no_futuro": "A data final (ate) não pode ser depois de hoje",
+    "periodo_longo_demais": "O período não pode passar de 366 dias",
+    "agrupamento_dia_longo_demais": "Agrupar por dia só vale para períodos de até 92 dias; "
+    "use semana ou mes",
 }
 
 _ENTIDADES = {
@@ -213,3 +222,12 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RegraInvalida)
     async def _regra_invalida(_: Request, exc: RegraInvalida) -> JSONResponse:
         return _resp(422, exc.motivo, _MOTIVOS_REGRA.get(exc.motivo, "Dados inválidos"))
+
+    @app.exception_handler(PeriodoInvalido)
+    async def _periodo_invalido(_: Request, exc: PeriodoInvalido) -> JSONResponse:
+        return _resp(
+            422,
+            "periodo_invalido",
+            _MOTIVOS_PERIODO.get(exc.motivo, "Período inválido"),
+            extra={"motivo": exc.motivo},
+        )

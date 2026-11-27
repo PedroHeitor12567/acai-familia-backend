@@ -3,7 +3,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, Field, StrictInt, StringConstraints, model_validator
 
-from app.application.comandas.dto import ResultadoFechamento
+from app.application.comandas.dto import DetalheComanda, ResultadoFechamento
 from app.application.comandas.use_cases.itens import AdicionalPedido
 from app.domain.comandas.entities import (
     AdicionalItem,
@@ -14,6 +14,7 @@ from app.domain.comandas.entities import (
 )
 from app.domain.comandas.regras import subtotal_item, total_efetivo
 from app.interfaces.http.schemas.base import DinheiroOut, EntradaEstrita, QuantidadeOut
+from app.interfaces.http.schemas.caixa import PagamentoIn, PagamentoOut
 
 ClienteNome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 ClienteContato = Annotated[str, StringConstraints(strip_whitespace=True, max_length=60)]
@@ -59,6 +60,10 @@ class CancelarIn(EntradaEstrita):
     motivo: Annotated[
         str | None, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
     ] = None
+
+
+class FecharComandaIn(EntradaEstrita):
+    pagamentos: list[PagamentoIn] = Field(default_factory=list, max_length=4)
 
 
 class AdicionalItemOut(BaseModel):
@@ -142,21 +147,35 @@ class ConsumoInsumoOut(BaseModel):
     quantidade: QuantidadeOut
 
 
-class FechamentoOut(ComandaOut):
-    """Comanda fechada + o que o fechamento baixou do estoque."""
+class ComandaDetalheOut(ComandaOut):
+    pagamentos: list[PagamentoOut]
+    troco: DinheiroOut
 
+    @classmethod
+    def de_detalhe(cls, d: DetalheComanda) -> Self:
+        base = ComandaOut.de_entidade(d.comanda)
+        return cls(
+            **base.model_dump(),
+            pagamentos=[PagamentoOut.de_entidade(p) for p in d.pagamentos],
+            troco=d.troco,
+        )
+
+
+class FechamentoOut(ComandaDetalheOut):
     consumo: list[ConsumoInsumoOut]
     itens_sem_ficha: list[int]  # itens sem ficha técnica: fecharam sem baixar estoque
+    sessao_caixa_id: int | None
 
     @classmethod
     def de_resultado(cls, r: ResultadoFechamento) -> Self:
-        base = ComandaOut.de_entidade(r.comanda)
+        base = ComandaDetalheOut.de_detalhe(DetalheComanda(r.comanda, r.pagamentos))
         return cls(
             **base.model_dump(),
             consumo=[
                 ConsumoInsumoOut(insumo_id=i, quantidade=q) for i, q in sorted(r.consumo.items())
             ],
             itens_sem_ficha=r.itens_sem_ficha,
+            sessao_caixa_id=r.sessao_id,
         )
 
 

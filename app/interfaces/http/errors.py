@@ -13,6 +13,7 @@ from app.domain.exceptions import (
     NomeJaCadastrado,
     OperacaoNaoPermitida,
     PermissaoNegada,
+    RegraInvalida,
     SenhaAtualIncorreta,
     TokenInvalido,
     UsuarioNaoEncontrado,
@@ -35,7 +36,31 @@ _MOTIVOS_COMANDA = {
     "comanda_vazia": "A comanda não tem itens; lance ao menos um item antes de fechar",
 }
 
+_MOTIVOS_CAIXA = {
+    "caixa_ja_aberto": "Já existe uma sessão de caixa aberta",
+    "caixa_fechado": "Não há caixa aberto; abra o caixa antes de fechar a comanda",
+    "sessao_nao_aberta": "A sessão de caixa não está aberta",
+    "saldo_caixa_insuficiente": "A retirada deixaria o saldo em dinheiro do caixa negativo",
+    "lancamento_nao_pendente": "O lançamento não está pendente (já foi baixado ou cancelado)",
+    "categoria_financeira_inativa": "A categoria financeira está inativa",
+}
+
+_MOTIVOS_REGRA = {
+    "pagamento_diferente_do_total": "Os pagamentos devem somar exatamente o total da comanda",
+    "forma_repetida": "A mesma forma de pagamento aparece mais de uma vez",
+    "valor_recebido_invalido": "valor_recebido só vale para dinheiro, com até 2 casas decimais",
+    "valor_recebido_insuficiente": "O valor recebido em dinheiro é menor que o valor pago",
+    "justificativa_obrigatoria": "Informe a observação: a contagem difere do valor esperado",
+    "categoria_incompativel": "A categoria não combina com o tipo do lançamento "
+    "(pagar usa despesa; receber usa receita)",
+}
+
 _MOTIVOS_VALOR = {
+    "pagamento_valor_invalido": "Valor de pagamento inválido: use valor > 0 com até 2 casas",
+    "motivo_movimento_invalido": "Motivo inválido: informe de 1 a 255 caracteres",
+    "nome_categoria_financeira_invalido": "Nome inválido: use de 1 a 80 caracteres",
+    "descricao_invalida": "Descrição inválida: use de 1 a 160 caracteres",
+    "contraparte_invalida": "Contraparte inválida: use até 120 caracteres",
     "cliente_nome_invalido": "Nome do cliente inválido: use de 1 a 120 caracteres",
     "cliente_contato_invalido": "Contato inválido: use até 60 caracteres",
     "observacao_invalida": "Observação inválida: use até 500 caracteres",
@@ -69,6 +94,7 @@ _ENTIDADES = {
     "adicional": "Já existe um adicional com este nome",
     "insumo": "Já existe um insumo com este nome",
     "produto": "Já existe um produto com este nome nesta categoria",
+    "categoria_financeira": "Já existe uma categoria financeira com este nome neste tipo",
 }
 
 
@@ -127,6 +153,8 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _operacao(_: Request, exc: OperacaoNaoPermitida) -> JSONResponse:
         if exc.motivo in _MOTIVOS_COMANDA:
             return _resp(409, exc.motivo, _MOTIVOS_COMANDA[exc.motivo])
+        if exc.motivo in _MOTIVOS_CAIXA:
+            return _resp(409, exc.motivo, _MOTIVOS_CAIXA[exc.motivo])
         return _resp(
             409,
             "operacao_nao_permitida",
@@ -181,3 +209,7 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ItemComandaInvalido)
     async def _item_invalido(_: Request, exc: ItemComandaInvalido) -> JSONResponse:
         return _resp(422, exc.motivo, _MOTIVOS_ITEM.get(exc.motivo, "Item inválido"))
+
+    @app.exception_handler(RegraInvalida)
+    async def _regra_invalida(_: Request, exc: RegraInvalida) -> JSONResponse:
+        return _resp(422, exc.motivo, _MOTIVOS_REGRA.get(exc.motivo, "Dados inválidos"))

@@ -1,9 +1,18 @@
 from collections.abc import Awaitable, Callable
+from datetime import date
 from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.application.caixa.use_cases.movimentos import RegistrarMovimento
+from app.application.caixa.use_cases.sessoes import (
+    AbrirCaixa,
+    FecharCaixa,
+    ListarSessoes,
+    ObterSessao,
+    ObterSessaoAtual,
+)
 from app.application.cardapio.use_cases.adicionais import (
     AlterarStatusAdicional,
     AtualizarAdicional,
@@ -50,6 +59,19 @@ from app.application.estoque.use_cases.insumos import (
     ObterInsumo,
 )
 from app.application.estoque.use_cases.movimentacoes import ListarMovimentacoes, MovimentarEstoque
+from app.application.financeiro.use_cases.categorias import (
+    AtualizarCategoriaFinanceira,
+    CriarCategoriaFinanceira,
+    ListarCategoriasFinanceiras,
+)
+from app.application.financeiro.use_cases.lancamentos import (
+    AtualizarLancamento,
+    BaixarLancamento,
+    CancelarLancamento,
+    CriarLancamento,
+    ListarLancamentos,
+    ObterLancamento,
+)
 from app.application.usuarios.use_cases.alterar_propria_senha import AlterarPropriaSenha
 from app.application.usuarios.use_cases.alterar_status_usuario import AlterarStatusUsuario
 from app.application.usuarios.use_cases.atualizar_usuario import AtualizarUsuario
@@ -68,6 +90,7 @@ from app.bootstrap.container import (
     get_atualizar_usuario,
     get_autenticar_usuario,
     get_criar_usuario,
+    get_hoje,
     get_listar_usuarios,
     get_obter_usuario,
     get_redefinir_senha,
@@ -145,6 +168,29 @@ ListarComandasDep = Annotated[ListarComandas, Depends(caso_de_uso(ListarComandas
 FecharComandaDep = Annotated[FecharComanda, Depends(caso_de_uso(FecharComanda))]
 CancelarComandaDep = Annotated[CancelarComanda, Depends(caso_de_uso(CancelarComanda))]
 
+AbrirCaixaDep = Annotated[AbrirCaixa, Depends(caso_de_uso(AbrirCaixa))]
+ObterSessaoAtualDep = Annotated[ObterSessaoAtual, Depends(caso_de_uso(ObterSessaoAtual))]
+ObterSessaoDep = Annotated[ObterSessao, Depends(caso_de_uso(ObterSessao))]
+ListarSessoesDep = Annotated[ListarSessoes, Depends(caso_de_uso(ListarSessoes))]
+RegistrarMovimentoDep = Annotated[RegistrarMovimento, Depends(caso_de_uso(RegistrarMovimento))]
+FecharCaixaDep = Annotated[FecharCaixa, Depends(caso_de_uso(FecharCaixa))]
+
+CriarCategoriaFinanceiraDep = Annotated[
+    CriarCategoriaFinanceira, Depends(caso_de_uso(CriarCategoriaFinanceira))
+]
+AtualizarCategoriaFinanceiraDep = Annotated[
+    AtualizarCategoriaFinanceira, Depends(caso_de_uso(AtualizarCategoriaFinanceira))
+]
+ListarCategoriasFinanceirasDep = Annotated[
+    ListarCategoriasFinanceiras, Depends(caso_de_uso(ListarCategoriasFinanceiras))
+]
+CriarLancamentoDep = Annotated[CriarLancamento, Depends(caso_de_uso(CriarLancamento))]
+ObterLancamentoDep = Annotated[ObterLancamento, Depends(caso_de_uso(ObterLancamento))]
+ListarLancamentosDep = Annotated[ListarLancamentos, Depends(caso_de_uso(ListarLancamentos))]
+AtualizarLancamentoDep = Annotated[AtualizarLancamento, Depends(caso_de_uso(AtualizarLancamento))]
+BaixarLancamentoDep = Annotated[BaixarLancamento, Depends(caso_de_uso(BaixarLancamento))]
+CancelarLancamentoDep = Annotated[CancelarLancamento, Depends(caso_de_uso(CancelarLancamento))]
+
 
 async def get_current_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
@@ -180,5 +226,9 @@ OperadorComandaDep = Annotated[
     Depends(require_roles(Papel.ADMIN, Papel.GERENTE, Papel.ATENDENTE, Papel.CAIXA)),
 ]
 FechamentoComandaDep = Annotated[
+    Usuario, Depends(require_roles(Papel.ADMIN, Papel.GERENTE, Papel.CAIXA))
+]
+HojeDep = Annotated[date, Depends(get_hoje)]
+OperadorCaixaDep = Annotated[
     Usuario, Depends(require_roles(Papel.ADMIN, Papel.GERENTE, Papel.CAIXA))
 ]

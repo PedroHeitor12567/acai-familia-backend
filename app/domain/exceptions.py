@@ -76,6 +76,26 @@ class ItemComandaNaoEncontrado(NaoEncontrado):
     mensagem = "Item da comanda não encontrado"
 
 
+class SessaoCaixaNaoEncontrada(NaoEncontrado):
+    code = "sessao_caixa_nao_encontrada"
+    mensagem = "Sessão de caixa não encontrada"
+
+
+class NenhumaSessaoAberta(NaoEncontrado):
+    code = "nenhuma_sessao_aberta"
+    mensagem = "Não há sessão de caixa aberta"
+
+
+class CategoriaFinanceiraNaoEncontrada(NaoEncontrado):
+    code = "categoria_financeira_nao_encontrada"
+    mensagem = "Categoria financeira não encontrada"
+
+
+class LancamentoNaoEncontrado(NaoEncontrado):
+    code = "lancamento_nao_encontrado"
+    mensagem = "Lançamento não encontrado"
+
+
 class NomeJaCadastrado(DomainError):
     """Nome duplicado (categoria, tamanho, adicional, insumo ou produto na mesma categoria)."""
 
@@ -120,6 +140,21 @@ class ItemComandaInvalido(DomainError):
     def __init__(self, motivo: str) -> None:
         super().__init__(motivo)
         self.motivo = motivo
+
+
+class RegraInvalida(DomainError):
+    def __init__(self, motivo: str) -> None:
+        super().__init__(motivo)
+        self.motivo = motivo
+
+
+class PagamentoInvalido(RegraInvalida): ...
+
+
+class CaixaInvalido(RegraInvalida): ...
+
+
+class LancamentoInvalido(RegraInvalida): ...
 
 
 class FichaTecnicaInvalida(DomainError):

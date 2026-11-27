@@ -1,8 +1,12 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from app.application.comandas.dto import ResultadoFechamento
 from app.application.shared.permissoes import exigir_fechamento_comanda
 from app.application.unit_of_work import UnitOfWork
+from app.domain.caixa.entities import Pagamento, PagamentoPedido
+from app.domain.caixa.regras import validar_pagamentos
 from app.domain.comandas.entities import Comanda
 from app.domain.comandas.regras import (
     consumo_da_comanda,
@@ -17,6 +21,7 @@ from app.domain.exceptions import (
     ComandaNaoEncontrada,
     EstoqueInsuficiente,
     EstoqueInsuficienteNoFechamento,
+    OperacaoNaoPermitida,
 )
 from app.domain.usuarios.entities import Usuario
 
@@ -24,20 +29,15 @@ MAX_MOTIVO = 255
 
 
 class FecharComanda:
-    """Fecha a comanda baixando o estoque na mesma transação: ou tudo é gravado, ou nada.
-
-    Ordem de locks: comanda -> insumos em ids crescentes (a ordem fixa evita deadlock entre
-    dois fechamentos que disputam os mesmos insumos). Um único `commit()` no fim. Quando a
-    Fase 3 ligar o pagamento, ele entra aqui, antes do commit.
-    """
-
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 
-    async def executar(self, ator: Usuario, comanda_id: int) -> ResultadoFechamento:
+    async def executar(
+        self, ator: Usuario, comanda_id: int, pagamentos: Sequence[PagamentoPedido]
+    ) -> ResultadoFechamento:
         exigir_fechamento_comanda(ator)
         try:
-            resultado = await self._fechar(ator, comanda_id)
+            resultado = await self._fechar(ator, comanda_id, pagamentos)
             await self._uow.commit()
         except Exception as erro:
             await self._uow.rollback()  # desfaz as baixas já feitas e solta os locks
@@ -50,28 +50,54 @@ class FecharComanda:
             raise
         return resultado
 
-    async def _fechar(self, ator: Usuario, comanda_id: int) -> ResultadoFechamento:
+    async def _fechar(
+        self, ator: Usuario, comanda_id: int, pagamentos: Sequence[PagamentoPedido]
+    ) -> ResultadoFechamento:
         uow = self._uow
-        # 1-2. trava a comanda e confere o status já com o lock; recusa comanda vazia
         comanda = await uow.comandas.obter(comanda_id, para_atualizar=True)
         if comanda is None:
             raise ComandaNaoEncontrada
         validar_fechamento(comanda)
 
-        # 3. consumo agregado da comanda inteira
+        total = total_comanda(comanda.itens)
+        validar_pagamentos(total, pagamentos)
+
+        sessao_id: int | None = None
+        if total > 0:
+            sessao = await uow.caixa.obter_sessao_aberta(para_atualizar=True)
+            if sessao is None:
+                raise OperacaoNaoPermitida("caixa_fechado")
+            sessao_id = sessao.id_persistido
+
         fichas_produto, fichas_adicional = await self._carregar_fichas(comanda)
         consumo = consumo_da_comanda(comanda.itens, fichas_produto, fichas_adicional)
         sem_ficha = itens_sem_ficha(comanda.itens, fichas_produto)
-
-        # 4-5. baixa uma vez por insumo, em ordem crescente; a primeira falta aborta tudo
         for insumo_id in sorted(consumo):
             await uow.estoque.aplicar_saida(
                 insumo_id, consumo[insumo_id], ator.id_persistido, motivo=f"comanda:{comanda_id}"
             )
 
+        agora = datetime.now(UTC)
+        gravados: list[Pagamento] = []
+        if sessao_id is not None:
+            for pedido in pagamentos:
+                gravados.append(
+                    await uow.caixa.adicionar_pagamento(
+                        Pagamento(
+                            comanda_id=comanda_id,
+                            sessao_id=sessao_id,
+                            forma=pedido.forma,
+                            valor=pedido.valor,
+                            valor_recebido=pedido.valor_recebido,
+                            criado_por_id=ator.id_persistido,
+                            criado_em=agora,
+                        )
+                    )
+                )
+        troco_total = sum((p.troco for p in gravados), start=Decimal("0.00"))
+
         # 6. status, quem/quando e o snapshot do total
-        total = total_comanda(comanda.itens)
-        await uow.comandas.marcar_fechada(comanda_id, ator.id_persistido, datetime.now(UTC), total)
+        await uow.comandas.marcar_fechada(comanda_id, ator.id_persistido, agora, total)
 
         # 7. auditoria
         await uow.auditoria.registrar(
@@ -82,6 +108,18 @@ class FecharComanda:
             {
                 "total": str(total),
                 "itens": len(comanda.itens),
+                "sessao_id": sessao_id,
+                "pagamentos": [
+                    {
+                        "forma": str(p.forma),
+                        "valor": str(p.valor),
+                        "valor_recebido": None
+                        if p.valor_recebido is None
+                        else str(p.valor_recebido),
+                    }
+                    for p in gravados
+                ],
+                "troco": str(troco_total),
                 "consumo": {str(i): str(q) for i, q in sorted(consumo.items())},
                 "itens_sem_ficha": sem_ficha,
             },
@@ -89,7 +127,7 @@ class FecharComanda:
         fechada = await uow.comandas.obter(comanda_id)
         if fechada is None:  # pragma: no cover - acabou de ser travada
             raise ComandaNaoEncontrada
-        return ResultadoFechamento(fechada, consumo, sem_ficha)
+        return ResultadoFechamento(fechada, consumo, sem_ficha, gravados, troco_total, sessao_id)
 
     async def _carregar_fichas(
         self, comanda: Comanda

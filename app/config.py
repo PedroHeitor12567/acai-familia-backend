@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_lockout_seconds: int = 300
     max_body_bytes: int = 1_000_000
+    timezone: str = "America/Sao_Paulo"
 
     @field_validator("database_url")
     @classmethod
@@ -28,6 +30,15 @@ class Settings(BaseSettings):
             if url.startswith(prefixo):
                 return "postgresql+asyncpg://" + url[len(prefixo) :]
         return url
+
+    @field_validator("timezone")
+    @classmethod
+    def _fuso_valido(cls, nome: str) -> str:
+        try:
+            ZoneInfo(nome)
+        except (ZoneInfoNotFoundError, ValueError) as erro:
+            raise ValueError(f"TIMEZONE inválido: {nome}") from erro
+        return nome
 
     @property
     def is_production(self) -> bool:

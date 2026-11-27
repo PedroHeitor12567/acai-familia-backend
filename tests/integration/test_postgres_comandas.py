@@ -5,190 +5,23 @@ verdade (as sessões concorrentes precisam enxergá-los) e removidos no fim.
 """
 
 import asyncio
-import os
-import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 from decimal import Decimal
-from typing import TypeVar
 
 import pytest
-from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import select
 
-from app.application.comandas.use_cases.abrir import AbrirComanda
-from app.application.comandas.use_cases.fechamento import FecharComanda
 from app.application.comandas.use_cases.itens import AdicionarItem
 from app.bootstrap.container import build_uow
-from app.domain.cardapio.entities import Categoria, Produto, ProdutoTamanho, Tamanho
 from app.domain.comandas.entities import StatusComanda
 from app.domain.comandas.regras import total_comanda
-from app.domain.estoque.entities import (
-    Insumo,
-    ItemFichaTecnica,
-    TipoMovimentacao,
-    UnidadeMedida,
-)
 from app.domain.exceptions import EstoqueInsuficienteNoFechamento, OperacaoNaoPermitida
-from app.domain.usuarios.entities import Papel, Usuario
-from app.infrastructure.persistence.auditoria.models import AuditLogModel
-from app.infrastructure.persistence.cardapio.models import (
-    CategoriaModel,
-    ProdutoModel,
-    ProdutoTamanhoModel,
-    TamanhoModel,
-)
-from app.infrastructure.persistence.comandas.models import ComandaModel
-from app.infrastructure.persistence.estoque.models import (
-    InsumoModel,
-    ItemFichaTecnicaModel,
-    MovimentacaoEstoqueModel,
-)
-from app.infrastructure.persistence.usuarios.models import UsuarioModel
-from app.infrastructure.persistence.usuarios.repository import SqlAlchemyUsuarioRepository
+from app.infrastructure.persistence.estoque.models import InsumoModel
+from tests.pg_cenario import Cenario, Factory, _cenario, _resultado
 
 pytestmark = pytest.mark.postgres
 
 D = Decimal
-T = TypeVar("T")
-Factory = async_sessionmaker[AsyncSession]
-
-
-@dataclass
-class Cenario:
-    """Produtos de R$ 10,00 cujas fichas consomem 1 unidade de cada insumo listado."""
-
-    factory: Factory
-    ator: Usuario
-    tamanho_id: int
-    insumos: list[int]  # ids crescentes: A < B < C
-    produtos: dict[str, int] = field(default_factory=dict)
-
-    async def saldo(self, insumo_id: int) -> Decimal:
-        async with self.factory() as s:
-            saldo = await s.scalar(
-                select(InsumoModel.estoque_atual).where(InsumoModel.id == insumo_id)
-            )
-        assert saldo is not None
-        return saldo
-
-    async def saidas(self, insumo_id: int) -> int:
-        async with self.factory() as s:
-            total = await s.scalar(
-                select(func.count())
-                .select_from(MovimentacaoEstoqueModel)
-                .where(
-                    MovimentacaoEstoqueModel.insumo_id == insumo_id,
-                    MovimentacaoEstoqueModel.tipo == "saida",
-                )
-            )
-        return total or 0
-
-    async def comanda_com_item(self, produto: str = "todos", quantidade: int = 1) -> int:
-        async with self.factory() as s:
-            uow = build_uow(s)
-            cid = (await AbrirComanda(uow).executar(self.ator, "Concorrência")).id_persistido
-            await AdicionarItem(uow).executar(
-                self.ator, cid, self.produtos[produto], self.tamanho_id, quantidade
-            )
-        return cid
-
-    async def fechar(self, comanda_id: int) -> None:
-        async with self.factory() as s:  # uma "requisição": sessão própria
-            await FecharComanda(build_uow(s)).executar(self.ator, comanda_id)
-
-    async def status(self, comanda_id: int) -> StatusComanda:
-        async with self.factory() as s:
-            comanda = await build_uow(s).comandas.obter(comanda_id)
-        assert comanda is not None
-        return comanda.status
-
-
-async def _semear(
-    factory: Factory, saldos: list[str], fichas: dict[str, list[int]]
-) -> tuple[Cenario, Callable[[], Awaitable[None]]]:
-    """Cria usuário, 3 insumos (com `saldos`) e um produto por entrada de `fichas`
-    (nome -> posições dos insumos que consome, 1 unidade de cada)."""
-    sufixo = uuid.uuid4().hex[:8]
-    async with factory() as s:
-        uow = build_uow(s)
-        ator = await SqlAlchemyUsuarioRepository(s).adicionar(
-            Usuario("Caixa PG", f"caixa-{sufixo}@acai.com", "x", Papel.CAIXA)
-        )
-        categoria = await uow.cardapio.adicionar_categoria(Categoria(f"Cat-{sufixo}"))
-        tamanho = await uow.cardapio.adicionar_tamanho(Tamanho(f"Tam-{sufixo}"))
-        insumos: list[int] = []
-        for i, saldo in enumerate(saldos):
-            insumo = await uow.estoque.adicionar_insumo(
-                Insumo(f"Insumo{i}-{sufixo}", UnidadeMedida.UN)
-            )
-            insumos.append(insumo.id_persistido)
-            if D(saldo) > 0:  # entrada de zero não existe; insumo sem saldo fica só criado
-                await uow.estoque.movimentar(
-                    insumo.id_persistido, TipoMovimentacao.ENTRADA, D(saldo), None
-                )
-        cenario = Cenario(factory, ator, tamanho.id_persistido, insumos)
-        for nome, posicoes in fichas.items():
-            produto = await uow.cardapio.adicionar_produto(
-                Produto(f"{nome}-{sufixo}", categoria.id_persistido)
-            )
-            await uow.cardapio.definir_preco(
-                ProdutoTamanho(produto.id_persistido, tamanho.id_persistido, D("10.00"))
-            )
-            await uow.ficha_tecnica.substituir_ficha_produto(
-                produto.id_persistido,
-                tamanho.id_persistido,
-                [ItemFichaTecnica(insumos[p], D("1")) for p in posicoes],
-            )
-            cenario.produtos[nome] = produto.id_persistido
-        await s.commit()
-
-    async def limpar() -> None:
-        async with factory() as s:
-            await s.execute(delete(ComandaModel).where(ComandaModel.aberta_por_id == ator.id))
-            await s.execute(
-                delete(MovimentacaoEstoqueModel).where(
-                    MovimentacaoEstoqueModel.insumo_id.in_(insumos)
-                )
-            )
-            await s.execute(
-                delete(ItemFichaTecnicaModel).where(ItemFichaTecnicaModel.insumo_id.in_(insumos))
-            )
-            ids_produtos = list(cenario.produtos.values())
-            await s.execute(
-                delete(ProdutoTamanhoModel).where(ProdutoTamanhoModel.produto_id.in_(ids_produtos))
-            )
-            await s.execute(delete(ProdutoModel).where(ProdutoModel.id.in_(ids_produtos)))
-            await s.execute(delete(TamanhoModel).where(TamanhoModel.id == cenario.tamanho_id))
-            await s.execute(delete(CategoriaModel).where(CategoriaModel.id == categoria.id))
-            await s.execute(delete(InsumoModel).where(InsumoModel.id.in_(insumos)))
-            await s.execute(delete(AuditLogModel).where(AuditLogModel.usuario_id == ator.id))
-            await s.execute(delete(UsuarioModel).where(UsuarioModel.id == ator.id))
-            await s.commit()
-
-    return cenario, limpar
-
-
-@pytest.fixture
-async def pg_factory() -> AsyncIterator[Factory]:
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL não definida")
-    engine = create_async_engine(url, pool_size=20)
-    try:
-        yield async_sessionmaker(bind=engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
-
-
-async def _cenario(
-    factory: Factory, saldos: list[str], fichas: dict[str, list[int]] | None = None
-) -> AsyncIterator[Cenario]:
-    cenario, limpar = await _semear(factory, saldos, fichas or {"todos": [0, 1, 2]})
-    try:
-        yield cenario
-    finally:
-        await limpar()
 
 
 @pytest.fixture
@@ -196,13 +29,6 @@ async def cenario_folgado(pg_factory: Factory) -> AsyncIterator[Cenario]:
     """3 insumos com 100 de saldo cada; o produto "todos" consome 1 de cada."""
     async for c in _cenario(pg_factory, ["100", "100", "100"]):
         yield c
-
-
-async def _resultado(coro: Awaitable[T]) -> T | Exception:
-    try:
-        return await coro
-    except Exception as erro:
-        return erro
 
 
 async def test_dois_fechamentos_simultaneos_da_mesma_comanda(cenario_folgado: Cenario) -> None:

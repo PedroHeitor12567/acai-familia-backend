@@ -5,14 +5,21 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.usuarios.entities import Papel
-from tests.comandas_helpers import Semente, semear_cardapio
+from tests.comandas_helpers import (
+    Semente,
+    abrir_caixa,
+    fechar_comanda_api,
+    semear_cardapio,
+)
 from tests.conftest import AuthHeaders
 
 
 @pytest.fixture
 async def sem(factory: async_sessionmaker[AsyncSession]) -> Semente:
     async with factory() as s:
-        return await semear_cardapio(s, estoque_granola="0.05")
+        semente = await semear_cardapio(s, estoque_granola="0.05")
+        await abrir_caixa(s)
+        return semente
 
 
 async def _comanda_com_item(
@@ -52,7 +59,7 @@ async def test_admin_gerente_e_caixa_fecham(
 ) -> None:
     h = await auth_headers(f"{papel}@acai.com", papel)
     cid = await _comanda_com_item(client, h, sem, quantidade=2)
-    r = await client.post(f"/comandas/{cid}/fechar", headers=h)
+    r = await fechar_comanda_api(client, h, cid)
     assert r.status_code == 200, r.text
     corpo = r.json()
     assert corpo["status"] == "fechada" and corpo["total"] == "37.80"
@@ -69,8 +76,8 @@ async def test_fechar_de_novo_da_409_e_nao_baixa_de_novo(
     h = await auth_headers("caixa@acai.com", Papel.CAIXA)
     gerente = await auth_headers("gerente@acai.com", Papel.GERENTE)
     cid = await _comanda_com_item(client, h, sem)
-    assert (await client.post(f"/comandas/{cid}/fechar", headers=h)).status_code == 200
-    r = await client.post(f"/comandas/{cid}/fechar", headers=h)
+    assert (await fechar_comanda_api(client, h, cid)).status_code == 200
+    r = await fechar_comanda_api(client, h, cid)
     assert r.status_code == 409 and r.json()["code"] == "comanda_nao_aberta"
     assert await _saldo(client, gerente, sem.polpa_id) == "9.700"
     # comanda fechada não aceita mais itens
@@ -87,9 +94,9 @@ async def test_fechar_comanda_vazia_e_inexistente(
 ) -> None:
     h = await auth_headers("caixa@acai.com", Papel.CAIXA)
     cid = (await client.post("/comandas", json={"cliente_nome": "Ana"}, headers=h)).json()["id"]
-    r = await client.post(f"/comandas/{cid}/fechar", headers=h)
+    r = await fechar_comanda_api(client, h, cid)
     assert r.status_code == 409 and r.json()["code"] == "comanda_vazia"
-    r = await client.post("/comandas/999/fechar", headers=h)
+    r = await fechar_comanda_api(client, h, 999)
     assert r.status_code == 404 and r.json()["code"] == "comanda_nao_encontrada"
 
 
@@ -101,7 +108,7 @@ async def test_falta_de_estoque_da_409_com_o_insumo_e_nao_baixa_nada(
     # granola: 0,02 * 3 = 0,06 > 0,05 em estoque; a polpa (id menor) é baixada antes e desfeita
     cid = await _comanda_com_item(client, h, sem, quantidade=1, adicionais=3)
 
-    r = await client.post(f"/comandas/{cid}/fechar", headers=h)
+    r = await fechar_comanda_api(client, h, cid)
 
     assert r.status_code == 409, r.text
     corpo = r.json()
@@ -144,7 +151,7 @@ async def test_cancelar_nao_mexe_no_estoque(
     assert await _saldo(client, gerente, sem.polpa_id) == "10.000"
     again = await client.post(f"/comandas/{cid}/cancelar", headers=h)  # sem corpo é válido
     assert again.status_code == 409 and again.json()["code"] == "comanda_nao_aberta"
-    assert (await client.post(f"/comandas/{cid}/fechar", headers=h)).status_code == 409
+    assert (await fechar_comanda_api(client, h, cid)).status_code == 409
     r = await client.patch(f"/comandas/{cid}/itens/1", json={"quantidade": 2}, headers=h)
     assert r.status_code == 409 and r.json()["code"] == "comanda_nao_aberta"
     r = await client.delete(f"/comandas/{cid}/itens/1", headers=h)

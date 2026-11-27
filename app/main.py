@@ -5,9 +5,11 @@ from app.interfaces.http.errors import register_error_handlers
 from app.interfaces.http.middleware import register_middleware
 from app.interfaces.http.routers import (
     auth,
+    caixa,
     cardapio,
     comandas,
     estoque,
+    financeiro,
     health,
     usuarios,
 )
@@ -26,7 +28,13 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(usuarios.router)
-    for router in (*cardapio.routers, *estoque.routers, comandas.router):
+    for router in (
+        *cardapio.routers,
+        *estoque.routers,
+        comandas.router,
+        caixa.router,
+        financeiro.router,
+    ):
         app.include_router(router)
     return app
 

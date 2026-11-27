@@ -19,3 +19,8 @@ def exigir_fechamento_comanda(ator: Usuario) -> None:
     fechamento é o momento do pagamento)."""
     if ator.papel not in (Papel.ADMIN, Papel.GERENTE, Papel.CAIXA):
         raise PermissaoNegada
+
+
+def exigir_operador_caixa(ator: Usuario) -> None:
+    if ator.papel not in (Papel.ADMIN, Papel.GERENTE, Papel.CAIXA):
+        raise PermissaoNegada

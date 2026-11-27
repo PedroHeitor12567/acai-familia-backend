@@ -44,6 +44,15 @@ from app.application.comandas.use_cases.abrir import AbrirComanda
 from app.application.comandas.use_cases.consulta import ListarComandas, ObterComanda
 from app.application.comandas.use_cases.fechamento import CancelarComanda, FecharComanda
 from app.application.comandas.use_cases.itens import AdicionarItem, AtualizarItem, RemoverItem
+from app.application.dashboard.contas import ObterPosicaoContas
+from app.application.dashboard.estoque_critico import ObterEstoqueCritico
+from app.application.dashboard.fluxo_caixa import ObterFluxoCaixa
+from app.application.dashboard.mais_vendidos import ObterMaisVendidos
+from app.application.dashboard.resumo_vendas import ObterResumoVendas
+from app.application.dashboard.serie_vendas import ObterSerieVendas
+from app.application.dashboard.vendas_por_forma import ObterVendasPorForma
+from app.application.dashboard.vendas_por_hora import ObterVendasPorHora
+from app.application.dashboard.visao_geral import ObterVisaoGeral
 from app.application.estoque.use_cases.ficha_tecnica import (
     DefinirFichaAdicional,
     DefinirFichaTecnica,
@@ -85,6 +94,7 @@ from app.bootstrap.container import (
     TokensDep,
     UowDep,
     caso_de_uso,
+    consulta_de_uso,
     get_alterar_propria_senha,
     get_alterar_status_usuario,
     get_atualizar_usuario,
@@ -190,6 +200,21 @@ ListarLancamentosDep = Annotated[ListarLancamentos, Depends(caso_de_uso(ListarLa
 AtualizarLancamentoDep = Annotated[AtualizarLancamento, Depends(caso_de_uso(AtualizarLancamento))]
 BaixarLancamentoDep = Annotated[BaixarLancamento, Depends(caso_de_uso(BaixarLancamento))]
 CancelarLancamentoDep = Annotated[CancelarLancamento, Depends(caso_de_uso(CancelarLancamento))]
+
+# --- dashboard (somente leitura) ---
+ObterVisaoGeralDep = Annotated[ObterVisaoGeral, Depends(consulta_de_uso(ObterVisaoGeral))]
+ObterResumoVendasDep = Annotated[ObterResumoVendas, Depends(consulta_de_uso(ObterResumoVendas))]
+ObterSerieVendasDep = Annotated[ObterSerieVendas, Depends(consulta_de_uso(ObterSerieVendas))]
+ObterMaisVendidosDep = Annotated[ObterMaisVendidos, Depends(consulta_de_uso(ObterMaisVendidos))]
+ObterVendasPorFormaDep = Annotated[
+    ObterVendasPorForma, Depends(consulta_de_uso(ObterVendasPorForma))
+]
+ObterVendasPorHoraDep = Annotated[ObterVendasPorHora, Depends(consulta_de_uso(ObterVendasPorHora))]
+ObterEstoqueCriticoDep = Annotated[
+    ObterEstoqueCritico, Depends(consulta_de_uso(ObterEstoqueCritico))
+]
+ObterFluxoCaixaDep = Annotated[ObterFluxoCaixa, Depends(consulta_de_uso(ObterFluxoCaixa))]
+ObterPosicaoContasDep = Annotated[ObterPosicaoContas, Depends(consulta_de_uso(ObterPosicaoContas))]
 
 
 async def get_current_user(

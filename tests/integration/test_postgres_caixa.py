@@ -253,8 +253,7 @@ async def test_migrations_0006_a_0008_aplicam_e_revertem() -> None:
         _alembic("upgrade", "head", url=url)
         assert novas <= await _tabelas(engine)
         try:
-            for _ in range(3):
-                _alembic("downgrade", "-1", url=url)
+            _alembic("downgrade", "0005", url=url)  # desfaz 0009 (índices), 0008, 0007 e 0006
             assert not (novas & await _tabelas(engine))
             assert "comandas" in await _tabelas(engine)
         finally:

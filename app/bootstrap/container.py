@@ -11,6 +11,7 @@ from typing import Annotated, TypeVar
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.dashboard.ports import DashboardQueries
 from app.application.seguranca.ports import LoginThrottle, PasswordHasher, TokenService
 from app.application.unit_of_work import UnitOfWork
 from app.application.usuarios.use_cases.alterar_propria_senha import AlterarPropriaSenha
@@ -24,6 +25,7 @@ from app.application.usuarios.use_cases.redefinir_senha import RedefinirSenha
 from app.application.usuarios.use_cases.renovar_token import RenovarToken
 from app.config import Settings, get_settings
 from app.domain.financeiro.regras import data_local
+from app.infrastructure.persistence.dashboard_queries import SqlAlchemyDashboardQueries
 from app.infrastructure.persistence.session import get_session, get_session_factory
 from app.infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from app.infrastructure.security.hashing import Argon2Hasher
@@ -49,6 +51,10 @@ def get_login_throttle() -> InMemoryLoginThrottle:
 
 def build_uow(session: AsyncSession) -> UnitOfWork:
     return SqlAlchemyUnitOfWork(session)
+
+
+def build_dashboard_queries(session: AsyncSession, fuso: str) -> DashboardQueries:
+    return SqlAlchemyDashboardQueries(session, fuso)
 
 
 def build_token_service(settings: Settings) -> TokenService:
@@ -91,7 +97,13 @@ def get_hoje(settings: SettingsDep) -> date:
     return data_local(datetime.now(UTC), settings.timezone)
 
 
+def get_dashboard_queries(session: SessionDep, settings: SettingsDep) -> DashboardQueries:
+    """Consultas de leitura do dashboard: a mesma sessão da requisição, sem UoW de escrita."""
+    return build_dashboard_queries(session, settings.timezone)
+
+
 UowDep = Annotated[UnitOfWork, Depends(get_uow)]
+DashboardQueriesDep = Annotated[DashboardQueries, Depends(get_dashboard_queries)]
 TokensDep = Annotated[TokenService, Depends(get_token_service)]
 
 _Caso = TypeVar("_Caso")
@@ -102,6 +114,17 @@ def caso_de_uso(caso: Callable[[UnitOfWork], _Caso]) -> Callable[[UowDep], _Caso
 
     def provider(uow: UowDep) -> _Caso:
         return caso(uow)
+
+    return provider
+
+
+def consulta_de_uso(
+    caso: Callable[[DashboardQueries], _Caso],
+) -> Callable[[DashboardQueriesDep], _Caso]:
+    """Provider FastAPI de um caso de uso de leitura do dashboard."""
+
+    def provider(queries: DashboardQueriesDep) -> _Caso:
+        return caso(queries)
 
     return provider
 

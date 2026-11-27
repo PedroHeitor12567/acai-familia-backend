@@ -167,3 +167,11 @@ class MuitasTentativas(DomainError):
     def __init__(self, retry_after: int) -> None:
         super().__init__("Muitas tentativas de login")
         self.retry_after = retry_after
+
+
+class PeriodoInvalido(DomainError):
+    """Período de consulta do dashboard fora das regras (`motivo` diz qual)."""
+
+    def __init__(self, motivo: str) -> None:
+        super().__init__(motivo)
+        self.motivo = motivo
